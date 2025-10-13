@@ -99,10 +99,10 @@ async fn main() -> anyhow::Result<()> {
         .split(',')
         .map(|addr| addr.trim().parse())
         .collect();
-    
-    let server_addresses = server_addresses
-        .map_err(|_| anyhow::anyhow!("Invalid server address format"))?;
-    
+
+    let server_addresses =
+        server_addresses.map_err(|_| anyhow::anyhow!("Invalid server address format"))?;
+
     if server_addresses.is_empty() {
         return Err(anyhow::anyhow!("At least one server address is required"));
     }
@@ -242,10 +242,12 @@ async fn generate_test_report(
         config.reporting.include_raw_data,
     );
 
-    report.export(
-        &config.reporting.output_format,
-        &config.reporting.output_path,
-    )?;
+    report
+        .export(
+            &config.reporting.output_format,
+            &config.reporting.output_path,
+        )
+        .await?;
 
     info!(
         "Test report generated: {}.{}",

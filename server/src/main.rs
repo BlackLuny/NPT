@@ -226,7 +226,7 @@ async fn generate_server_report(
         true,
     );
 
-    report.export(output_format, output_path)?;
+    report.export(output_format, output_path).await?;
 
     info!(
         "Server metrics report generated: {}.{}",

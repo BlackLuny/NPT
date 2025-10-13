@@ -1,4 +1,4 @@
-use crate::{ConnectionMetrics, ThroughputSample, LatencySample, ErrorSample, OutputFormat};
+use crate::{ConnectionMetrics, ErrorSample, LatencySample, OutputFormat, ThroughputSample};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -110,7 +110,8 @@ impl TestReport {
         include_raw_data: bool,
     ) -> Self {
         let summary = Self::calculate_summary(&connections);
-        let performance = Self::calculate_performance(&connections, &throughput_samples, &latency_samples);
+        let performance =
+            Self::calculate_performance(&connections, &throughput_samples, &latency_samples);
         let connection_stats = Self::calculate_connection_stats(&connections);
         let throughput_stats = Self::calculate_throughput_stats(&throughput_samples);
         let latency_stats = Self::calculate_latency_stats(&latency_samples);
@@ -140,7 +141,10 @@ impl TestReport {
 
     fn calculate_summary(connections: &[ConnectionMetrics]) -> TestSummary {
         let total_connections = connections.len() as u64;
-        let successful_connections = connections.iter().filter(|c| c.end_time.is_some() && c.errors == 0).count() as u64;
+        let successful_connections = connections
+            .iter()
+            .filter(|c| c.end_time.is_some() && c.errors == 0)
+            .count() as u64;
         let failed_connections = total_connections - successful_connections;
 
         let total_bytes_sent = connections.iter().map(|c| c.bytes_sent).sum();
@@ -148,8 +152,13 @@ impl TestReport {
         let total_packets_sent = connections.iter().map(|c| c.packets_sent).sum();
         let total_packets_received = connections.iter().map(|c| c.packets_received).sum();
 
-        let start_time = connections.iter().map(|c| c.start_time).min().unwrap_or_else(chrono::Utc::now);
-        let end_time = connections.iter()
+        let start_time = connections
+            .iter()
+            .map(|c| c.start_time)
+            .min()
+            .unwrap_or_else(chrono::Utc::now);
+        let end_time = connections
+            .iter()
             .filter_map(|c| c.end_time)
             .max()
             .unwrap_or_else(chrono::Utc::now);
@@ -175,7 +184,8 @@ impl TestReport {
         throughput_samples: &[ThroughputSample],
         _latency_samples: &[LatencySample],
     ) -> PerformanceMetrics {
-        let all_latencies: Vec<f64> = connections.iter()
+        let all_latencies: Vec<f64> = connections
+            .iter()
             .flat_map(|c| c.latencies.iter().map(|d| d.as_millis() as f64))
             .collect();
 
@@ -192,16 +202,26 @@ impl TestReport {
         let p95_latency_ms = percentile(&sorted_latencies, 95.0);
         let p99_latency_ms = percentile(&sorted_latencies, 99.0);
 
-        let total_bytes = connections.iter().map(|c| c.bytes_sent + c.bytes_received).sum::<u64>();
-        let total_duration = connections.iter()
+        let total_bytes = connections
+            .iter()
+            .map(|c| c.bytes_sent + c.bytes_received)
+            .sum::<u64>();
+        let total_duration = connections
+            .iter()
             .filter_map(|c| c.end_time.map(|end| (end - c.start_time).num_seconds()))
             .max()
             .unwrap_or(1) as f64;
 
         let avg_throughput_mbps = (total_bytes as f64 * 8.0) / (total_duration * 1_000_000.0);
 
-        let peak_throughput_mbps = throughput_samples.iter()
-            .map(|s| (s.tcp_upload_bps + s.tcp_download_bps + s.udp_upload_bps + s.udp_download_bps) as f64 * 8.0 / 1_000_000.0)
+        let peak_throughput_mbps = throughput_samples
+            .iter()
+            .map(|s| {
+                (s.tcp_upload_bps + s.tcp_download_bps + s.udp_upload_bps + s.udp_download_bps)
+                    as f64
+                    * 8.0
+                    / 1_000_000.0
+            })
             .fold(0.0f64, f64::max);
 
         let total_errors = connections.iter().map(|c| c.errors).sum::<u64>();
@@ -230,24 +250,31 @@ impl TestReport {
     }
 
     fn calculate_connection_stats(connections: &[ConnectionMetrics]) -> ConnectionStats {
-        let tcp_connections = connections.iter()
+        let tcp_connections = connections
+            .iter()
             .filter(|c| matches!(c.connection_type, crate::ConnectionType::Tcp))
             .count() as u64;
-        
-        let udp_connections = connections.iter()
+
+        let udp_connections = connections
+            .iter()
             .filter(|c| matches!(c.connection_type, crate::ConnectionType::Udp))
             .count() as u64;
 
-        let durations: Vec<Duration> = connections.iter()
+        let durations: Vec<Duration> = connections
+            .iter()
             .filter_map(|c| {
-                c.end_time.map(|end| (end - c.start_time).to_std().unwrap_or_default())
+                c.end_time
+                    .map(|end| (end - c.start_time).to_std().unwrap_or_default())
             })
             .collect();
 
         let avg_connection_duration = if durations.is_empty() {
             Duration::default()
         } else {
-            Duration::from_nanos((durations.iter().map(|d| d.as_nanos()).sum::<u128>() / durations.len() as u128) as u64)
+            Duration::from_nanos(
+                (durations.iter().map(|d| d.as_nanos()).sum::<u128>() / durations.len() as u128)
+                    as u64,
+            )
         };
 
         let max_connection_duration = durations.iter().max().cloned().unwrap_or_default();
@@ -346,11 +373,13 @@ impl TestReport {
         _error_samples: &[ErrorSample],
     ) -> ErrorStats {
         let total_errors = connections.iter().map(|c| c.errors).sum::<u64>();
-        let tcp_errors = connections.iter()
+        let tcp_errors = connections
+            .iter()
             .filter(|c| matches!(c.connection_type, crate::ConnectionType::Tcp))
             .map(|c| c.errors)
             .sum::<u64>();
-        let udp_errors = connections.iter()
+        let udp_errors = connections
+            .iter()
             .filter(|c| matches!(c.connection_type, crate::ConnectionType::Udp))
             .map(|c| c.errors)
             .sum::<u64>();
@@ -368,11 +397,11 @@ impl TestReport {
         // Collect all error details from connections
         let mut all_error_details = Vec::new();
         let mut error_types = HashMap::new();
-        
+
         for connection in connections {
             for error_detail in &connection.error_details {
                 all_error_details.push(error_detail.clone());
-                
+
                 let error_type_name = format!("{:?}", error_detail.error_type);
                 *error_types.entry(error_type_name).or_insert(0) += 1;
             }
@@ -395,11 +424,11 @@ impl TestReport {
         }
     }
 
-    pub fn export(&self, format: &OutputFormat, path: &str) -> anyhow::Result<()> {
+    pub async fn export(&self, format: &OutputFormat, path: &str) -> anyhow::Result<()> {
         match format {
             OutputFormat::Json => {
                 let json = serde_json::to_string_pretty(self)?;
-                std::fs::write(format!("{}.json", path), json)?;
+                tokio::fs::write(format!("{}.json", path), json).await?;
             }
             OutputFormat::Csv => {
                 self.export_csv(path)?;
@@ -414,13 +443,34 @@ impl TestReport {
     fn export_csv(&self, path: &str) -> anyhow::Result<()> {
         let mut csv_content = String::new();
         csv_content.push_str("metric,value\n");
-        csv_content.push_str(&format!("total_connections,{}\n", self.summary.total_connections));
-        csv_content.push_str(&format!("successful_connections,{}\n", self.summary.successful_connections));
-        csv_content.push_str(&format!("failed_connections,{}\n", self.summary.failed_connections));
-        csv_content.push_str(&format!("avg_throughput_mbps,{}\n", self.performance.avg_throughput_mbps));
-        csv_content.push_str(&format!("peak_throughput_mbps,{}\n", self.performance.peak_throughput_mbps));
-        csv_content.push_str(&format!("avg_latency_ms,{}\n", self.performance.avg_latency_ms));
-        csv_content.push_str(&format!("p95_latency_ms,{}\n", self.performance.p95_latency_ms));
+        csv_content.push_str(&format!(
+            "total_connections,{}\n",
+            self.summary.total_connections
+        ));
+        csv_content.push_str(&format!(
+            "successful_connections,{}\n",
+            self.summary.successful_connections
+        ));
+        csv_content.push_str(&format!(
+            "failed_connections,{}\n",
+            self.summary.failed_connections
+        ));
+        csv_content.push_str(&format!(
+            "avg_throughput_mbps,{}\n",
+            self.performance.avg_throughput_mbps
+        ));
+        csv_content.push_str(&format!(
+            "peak_throughput_mbps,{}\n",
+            self.performance.peak_throughput_mbps
+        ));
+        csv_content.push_str(&format!(
+            "avg_latency_ms,{}\n",
+            self.performance.avg_latency_ms
+        ));
+        csv_content.push_str(&format!(
+            "p95_latency_ms,{}\n",
+            self.performance.p95_latency_ms
+        ));
         csv_content.push_str(&format!("error_rate,{}\n", self.errors.error_rate));
 
         // Add error type breakdown
@@ -429,7 +479,7 @@ impl TestReport {
         }
 
         std::fs::write(format!("{}.csv", path), csv_content)?;
-        
+
         // Export detailed errors to separate CSV
         let mut errors_csv = String::new();
         errors_csv.push_str("timestamp,error_type,connection_id,message,context\n");
@@ -444,7 +494,7 @@ impl TestReport {
             ));
         }
         std::fs::write(format!("{}_errors.csv", path), errors_csv)?;
-        
+
         Ok(())
     }
 
@@ -453,7 +503,7 @@ impl TestReport {
         let mut error_types_html = String::new();
         for (error_type, count) in &self.errors.error_types {
             error_types_html.push_str(&format!(
-                "<tr><td>{}</td><td>{}</td></tr>\n", 
+                "<tr><td>{}</td><td>{}</td></tr>\n",
                 error_type, count
             ));
         }
@@ -555,11 +605,11 @@ fn percentile(sorted_values: &[f64], p: f64) -> f64 {
     if sorted_values.is_empty() {
         return 0.0;
     }
-    
+
     let index = (p / 100.0) * (sorted_values.len() - 1) as f64;
     let lower = index.floor() as usize;
     let upper = index.ceil() as usize;
-    
+
     if lower == upper {
         sorted_values[lower]
     } else {
