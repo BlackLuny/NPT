@@ -139,7 +139,7 @@ impl ServerTui {
         if let Some(latency) = self.metrics.get_latest_latency() {
             self.latency_history.push((
                 elapsed,
-                latency.tcp_latency_ms.max(latency.udp_latency_ms),
+                latency.tcp_latency_ms,
             ));
         }
 

@@ -1,5 +1,6 @@
 use rand::Rng;
 use shared::{MetricsCollector, TestConfig, UserActivity};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
@@ -86,6 +87,9 @@ impl UserSimulator {
     ) -> anyhow::Result<()> {
         let _permit = semaphore.acquire().await?;
 
+        // Increment active users when starting
+        tcp_client.inner.get_metrics().increment_active_users();
+
         let start_time = Instant::now();
         let user_session_duration = Duration::from_secs(
             rand::thread_rng().gen_range(config.duration.as_secs() / 2..=config.duration.as_secs()),
@@ -96,6 +100,12 @@ impl UserSimulator {
             user_id,
             user_session_duration
         );
+        let stoped = Arc::new(AtomicBool::new(false));
+        let stoped_clone = stoped.clone();
+        let set_stop = tokio::spawn(async move {
+            tokio::time::sleep(user_session_duration).await;
+            stoped_clone.store(true, Ordering::Relaxed);
+        });
 
         while start_time.elapsed() < user_session_duration {
             let activity = Self::choose_random_activity(&config);
@@ -103,7 +113,11 @@ impl UserSimulator {
             let activity_start = Instant::now();
             let result = match &activity {
                 UserActivity::Gaming { .. } => udp_client.simulate_user_activity(activity).await,
-                _ => tcp_client.simulate_user_activity(activity).await,
+                _ => {
+                    tcp_client
+                        .simulate_user_activity(activity, stoped.clone())
+                        .await
+                }
             };
 
             match result {
@@ -120,13 +134,21 @@ impl UserSimulator {
             }
 
             let think_time = Self::generate_think_time(&config);
-            if think_time + start_time.elapsed() > user_session_duration {
+            tokio::time::sleep(think_time).await;
+            if think_time + start_time.elapsed() > user_session_duration
+                || stoped.load(Ordering::Relaxed)
+            {
                 break;
             }
-            tokio::time::sleep(think_time).await;
         }
 
         tracing::debug!("User {} finished session", user_id);
+
+        set_stop.abort();
+
+        // Decrement active users when finishing
+        tcp_client.inner.get_metrics().decrement_active_users();
+
         Ok(())
     }
 
@@ -145,7 +167,7 @@ impl UserSimulator {
         if random_weight < normalized_web {
             UserActivity::WebBrowsing {
                 pages_to_visit: rng.gen_range(1..=5),
-                requests_per_page: (rng.gen_range(3..=10), rng.gen_range(10..=30)),
+                requests_per_page: (rng.gen_range(2..=5), rng.gen_range(5..=10)),
             }
         } else if random_weight < normalized_download {
             UserActivity::FileDownload {
@@ -189,8 +211,12 @@ impl TcpClient {
         }
     }
 
-    pub async fn simulate_user_activity(&self, activity: UserActivity) -> anyhow::Result<()> {
-        self.inner.simulate_user_activity(activity).await
+    pub async fn simulate_user_activity(
+        &self,
+        activity: UserActivity,
+        stoped: Arc<AtomicBool>,
+    ) -> anyhow::Result<()> {
+        self.inner.simulate_user_activity(activity, stoped).await
     }
 }
 

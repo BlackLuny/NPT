@@ -1,3 +1,4 @@
+use dashmap::DashMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -45,7 +46,7 @@ pub struct ErrorSample {
 
 #[derive(Debug)]
 pub struct MetricsCollector {
-    pub connections: Arc<RwLock<HashMap<Uuid, ConnectionMetrics>>>,
+    pub connections: Arc<DashMap<Uuid, ConnectionMetrics>>,
     pub throughput_history: Arc<RwLock<Vec<ThroughputSample>>>,
     pub latency_history: Arc<RwLock<Vec<LatencySample>>>,
     pub error_history: Arc<RwLock<Vec<ErrorSample>>>,
@@ -55,6 +56,8 @@ pub struct MetricsCollector {
     last_tcp_bytes_received: Arc<RwLock<u64>>,
     last_udp_bytes_sent: Arc<RwLock<u64>>,
     last_udp_bytes_received: Arc<RwLock<u64>>,
+    active_users: Arc<RwLock<u32>>,
+    total_users: Arc<RwLock<u32>>,
 }
 
 impl Default for MetricsCollector {
@@ -67,7 +70,7 @@ impl MetricsCollector {
     pub fn new() -> Self {
         let now = Instant::now();
         Self {
-            connections: Arc::new(RwLock::new(HashMap::new())),
+            connections: Arc::new(DashMap::new()),
             throughput_history: Arc::new(RwLock::new(Vec::new())),
             latency_history: Arc::new(RwLock::new(Vec::new())),
             error_history: Arc::new(RwLock::new(Vec::new())),
@@ -77,6 +80,8 @@ impl MetricsCollector {
             last_tcp_bytes_received: Arc::new(RwLock::new(0)),
             last_udp_bytes_sent: Arc::new(RwLock::new(0)),
             last_udp_bytes_received: Arc::new(RwLock::new(0)),
+            active_users: Arc::new(RwLock::new(0)),
+            total_users: Arc::new(RwLock::new(0)),
         }
     }
 
@@ -94,10 +99,15 @@ impl MetricsCollector {
             latencies: Vec::new(),
             user_activity: None,
         };
-        self.connections.write().insert(id, metrics);
+        self.connections.insert(id, metrics);
     }
 
-    pub fn start_connection_with_activity(&self, id: Uuid, connection_type: crate::ConnectionType, activity: crate::UserActivity) {
+    pub fn start_connection_with_activity(
+        &self,
+        id: Uuid,
+        connection_type: crate::ConnectionType,
+        activity: crate::UserActivity,
+    ) {
         let metrics = ConnectionMetrics {
             id,
             connection_type,
@@ -111,47 +121,47 @@ impl MetricsCollector {
             latencies: Vec::new(),
             user_activity: Some(activity),
         };
-        self.connections.write().insert(id, metrics);
+        self.connections.insert(id, metrics);
     }
 
     pub fn end_connection(&self, id: &Uuid) {
-        if let Some(metrics) = self.connections.write().get_mut(id) {
+        if let Some(mut metrics) = self.connections.get_mut(id) {
             metrics.end_time = Some(chrono::Utc::now());
         }
     }
 
     pub fn record_bytes_sent(&self, id: &Uuid, bytes: u64) {
-        if let Some(metrics) = self.connections.write().get_mut(id) {
+        if let Some(mut metrics) = self.connections.get_mut(id) {
             metrics.bytes_sent += bytes;
         }
     }
 
     pub fn record_bytes_received(&self, id: &Uuid, bytes: u64) {
-        if let Some(metrics) = self.connections.write().get_mut(id) {
+        if let Some(mut metrics) = self.connections.get_mut(id) {
             metrics.bytes_received += bytes;
         }
     }
 
     pub fn record_packet_sent(&self, id: &Uuid) {
-        if let Some(metrics) = self.connections.write().get_mut(id) {
+        if let Some(mut metrics) = self.connections.get_mut(id) {
             metrics.packets_sent += 1;
         }
     }
 
     pub fn record_packet_received(&self, id: &Uuid) {
-        if let Some(metrics) = self.connections.write().get_mut(id) {
+        if let Some(mut metrics) = self.connections.get_mut(id) {
             metrics.packets_received += 1;
         }
     }
 
     pub fn record_error(&self, id: &Uuid) {
-        if let Some(metrics) = self.connections.write().get_mut(id) {
+        if let Some(mut metrics) = self.connections.get_mut(id) {
             metrics.errors += 1;
         }
     }
 
     pub fn record_latency(&self, id: &Uuid, latency: Duration) {
-        if let Some(metrics) = self.connections.write().get_mut(id) {
+        if let Some(mut metrics) = self.connections.get_mut(id) {
             metrics.latencies.push(latency);
         }
     }
@@ -159,14 +169,13 @@ impl MetricsCollector {
     pub fn sample_throughput(&self) {
         let now = Instant::now();
         let timestamp = chrono::Utc::now();
-        
-        let connections = self.connections.read();
+
         let mut tcp_upload = 0u64;
         let mut tcp_download = 0u64;
         let mut udp_upload = 0u64;
         let mut udp_download = 0u64;
 
-        for metrics in connections.values() {
+        for metrics in self.connections.iter() {
             match metrics.connection_type {
                 crate::ConnectionType::Tcp => {
                     tcp_upload += metrics.bytes_sent;
@@ -178,7 +187,6 @@ impl MetricsCollector {
                 }
             }
         }
-        drop(connections);
 
         let mut last_sample_time = self.last_sample_time.write();
         let mut last_tcp_bytes_sent = self.last_tcp_bytes_sent.write();
@@ -187,23 +195,23 @@ impl MetricsCollector {
         let mut last_udp_bytes_received = self.last_udp_bytes_received.write();
 
         let elapsed = now.duration_since(*last_sample_time).as_secs_f64();
-        
+
         // Only calculate if enough time has passed to avoid division by very small numbers
         if elapsed >= 0.1 {
             // Calculate TCP deltas
             let tcp_upload_delta = tcp_upload.saturating_sub(*last_tcp_bytes_sent);
             let tcp_download_delta = tcp_download.saturating_sub(*last_tcp_bytes_received);
-            
+
             // Calculate UDP deltas
             let udp_upload_delta = udp_upload.saturating_sub(*last_udp_bytes_sent);
             let udp_download_delta = udp_download.saturating_sub(*last_udp_bytes_received);
-            
+
             // Calculate bytes per second for each protocol
             let tcp_upload_bps = (tcp_upload_delta as f64 / elapsed) as u64;
             let tcp_download_bps = (tcp_download_delta as f64 / elapsed) as u64;
             let udp_upload_bps = (udp_upload_delta as f64 / elapsed) as u64;
             let udp_download_bps = (udp_download_delta as f64 / elapsed) as u64;
-            
+
             self.throughput_history.write().push(ThroughputSample {
                 timestamp,
                 tcp_upload_bps,
@@ -223,30 +231,28 @@ impl MetricsCollector {
 
     pub fn sample_latency(&self) {
         let timestamp = chrono::Utc::now();
-        let connections = self.connections.read();
-        
+
         let mut tcp_latencies = Vec::new();
         let mut udp_latencies = Vec::new();
 
-        for metrics in connections.values() {
+        for metrics in self.connections.iter() {
             match metrics.connection_type {
                 crate::ConnectionType::Tcp => {
                     if !metrics.latencies.is_empty() {
-                        let avg = metrics.latencies.iter().sum::<Duration>().as_millis() as f64 
+                        let avg = metrics.latencies.iter().sum::<Duration>().as_millis() as f64
                             / metrics.latencies.len() as f64;
                         tcp_latencies.push(avg);
                     }
                 }
                 crate::ConnectionType::Udp => {
                     if !metrics.latencies.is_empty() {
-                        let avg = metrics.latencies.iter().sum::<Duration>().as_millis() as f64 
+                        let avg = metrics.latencies.iter().sum::<Duration>().as_millis() as f64
                             / metrics.latencies.len() as f64;
                         udp_latencies.push(avg);
                     }
                 }
             }
         }
-        drop(connections);
 
         let tcp_avg = if tcp_latencies.is_empty() {
             0.0
@@ -269,18 +275,16 @@ impl MetricsCollector {
 
     pub fn sample_errors(&self) {
         let timestamp = chrono::Utc::now();
-        let connections = self.connections.read();
-        
+
         let mut tcp_errors = 0u64;
         let mut udp_errors = 0u64;
 
-        for metrics in connections.values() {
+        for metrics in self.connections.iter() {
             match metrics.connection_type {
                 crate::ConnectionType::Tcp => tcp_errors += metrics.errors,
                 crate::ConnectionType::Udp => udp_errors += metrics.errors,
             }
         }
-        drop(connections);
 
         self.error_history.write().push(ErrorSample {
             timestamp,
@@ -291,17 +295,19 @@ impl MetricsCollector {
 
     pub fn get_active_tcp_connections(&self) -> usize {
         self.connections
-            .read()
-            .values()
-            .filter(|m| matches!(m.connection_type, crate::ConnectionType::Tcp) && m.end_time.is_none())
+            .iter()
+            .filter(|m| {
+                matches!(m.connection_type, crate::ConnectionType::Tcp) && m.end_time.is_none()
+            })
             .count()
     }
 
     pub fn get_active_udp_connections(&self) -> usize {
         self.connections
-            .read()
-            .values()
-            .filter(|m| matches!(m.connection_type, crate::ConnectionType::Udp) && m.end_time.is_none())
+            .iter()
+            .filter(|m| {
+                matches!(m.connection_type, crate::ConnectionType::Udp) && m.end_time.is_none()
+            })
             .count()
     }
 
@@ -319,34 +325,63 @@ impl MetricsCollector {
 
     pub fn get_active_web_browsing_tasks(&self) -> usize {
         self.connections
-            .read()
-            .values()
+            .iter()
             .filter(|m| {
-                m.end_time.is_none() && 
-                matches!(m.user_activity, Some(crate::UserActivity::WebBrowsing { .. }))
+                m.end_time.is_none()
+                    && matches!(
+                        m.user_activity,
+                        Some(crate::UserActivity::WebBrowsing { .. })
+                    )
             })
             .count()
     }
 
     pub fn get_active_file_download_tasks(&self) -> usize {
         self.connections
-            .read()
-            .values()
+            .iter()
             .filter(|m| {
-                m.end_time.is_none() && 
-                matches!(m.user_activity, Some(crate::UserActivity::FileDownload { .. }))
+                m.end_time.is_none()
+                    && matches!(
+                        m.user_activity,
+                        Some(crate::UserActivity::FileDownload { .. })
+                    )
             })
             .count()
     }
 
     pub fn get_active_file_upload_tasks(&self) -> usize {
         self.connections
-            .read()
-            .values()
+            .iter()
             .filter(|m| {
-                m.end_time.is_none() && 
-                matches!(m.user_activity, Some(crate::UserActivity::FileUpload { .. }))
+                m.end_time.is_none()
+                    && matches!(
+                        m.user_activity,
+                        Some(crate::UserActivity::FileUpload { .. })
+                    )
             })
             .count()
+    }
+
+    pub fn set_total_users(&self, count: u32) {
+        *self.total_users.write() = count;
+    }
+
+    pub fn get_total_users(&self) -> u32 {
+        *self.total_users.read()
+    }
+
+    pub fn increment_active_users(&self) {
+        *self.active_users.write() += 1;
+    }
+
+    pub fn decrement_active_users(&self) {
+        let mut active = self.active_users.write();
+        if *active > 0 {
+            *active -= 1;
+        }
+    }
+
+    pub fn get_active_users(&self) -> u32 {
+        *self.active_users.read()
     }
 }

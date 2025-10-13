@@ -1,24 +1,24 @@
 mod simulator;
 mod tcp_client;
-mod udp_client;
 mod tui;
+mod udp_client;
 
 use clap::{Arg, Command};
-use shared::{LogBuffer, TestConfig, MetricsCollector, TestReport, OutputFormat, TuiLogFormatter};
+use shared::{LogBuffer, MetricsCollector, OutputFormat, TestConfig, TestReport, TuiLogFormatter};
 use simulator::UserSimulator;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
 use tokio::sync::mpsc;
-use tui::ClientTui;
 use tracing::{info, warn};
+use tui::ClientTui;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Create log buffer for TUI
     let log_buffer = LogBuffer::new(1000);
-    
+
     // Initialize logging
     if std::env::args().any(|arg| arg == "--no-tui") {
         // For headless mode, use standard logging
@@ -27,17 +27,18 @@ async fn main() -> anyhow::Result<()> {
         // For TUI mode, use custom formatter
         use tracing_subscriber::prelude::*;
         use tracing_subscriber::{fmt, Registry};
-        
+
         let tui_formatter = TuiLogFormatter::new_with_suppression(log_buffer.clone(), true);
-        
+
         // Completely suppress ALL output in TUI mode - redirect stderr to sink as well
         let subscriber = Registry::default()
-            .with(fmt::layer()
-                .event_format(tui_formatter)
-                .with_writer(std::io::sink)) // Suppress normal output
-            .with(fmt::layer()
-                .with_writer(std::io::sink)); // Double layer to catch any leaks
-                
+            .with(
+                fmt::layer()
+                    .event_format(tui_formatter)
+                    .with_writer(std::io::sink),
+            ) // Suppress normal output
+            .with(fmt::layer().with_writer(std::io::sink)); // Double layer to catch any leaks
+
         tracing::subscriber::set_global_default(subscriber)?;
     }
 
@@ -50,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
                 .long("server")
                 .value_name("ADDRESS")
                 .help("Server address to connect to")
-                .default_value("127.0.0.1:8080")
+                .default_value("127.0.0.1:8080"),
         )
         .arg(
             Arg::new("users")
@@ -58,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
                 .long("users")
                 .value_name("COUNT")
                 .help("Number of concurrent users to simulate")
-                .default_value("100")
+                .default_value("100"),
         )
         .arg(
             Arg::new("duration")
@@ -66,13 +67,13 @@ async fn main() -> anyhow::Result<()> {
                 .long("duration")
                 .value_name("SECONDS")
                 .help("Test duration in seconds")
-                .default_value("300")
+                .default_value("300"),
         )
         .arg(
             Arg::new("no-tui")
                 .long("no-tui")
                 .help("Disable the TUI and run in headless mode")
-                .action(clap::ArgAction::SetTrue)
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("output")
@@ -80,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
                 .long("output")
                 .value_name("PATH")
                 .help("Output path for test report")
-                .default_value("./client_report")
+                .default_value("./client_report"),
         )
         .arg(
             Arg::new("format")
@@ -88,21 +89,24 @@ async fn main() -> anyhow::Result<()> {
                 .long("format")
                 .value_name("FORMAT")
                 .help("Output format: json, csv, html")
-                .default_value("json")
+                .default_value("json"),
         )
         .get_matches();
 
-    let server_addr: SocketAddr = matches.get_one::<String>("server")
+    let server_addr: SocketAddr = matches
+        .get_one::<String>("server")
         .unwrap()
         .parse()
         .map_err(|_| anyhow::anyhow!("Invalid server address"))?;
 
-    let concurrent_users: u32 = matches.get_one::<String>("users")
+    let concurrent_users: u32 = matches
+        .get_one::<String>("users")
         .unwrap()
         .parse()
         .map_err(|_| anyhow::anyhow!("Invalid user count"))?;
 
-    let duration_secs: u64 = matches.get_one::<String>("duration")
+    let duration_secs: u64 = matches
+        .get_one::<String>("duration")
         .unwrap()
         .parse()
         .map_err(|_| anyhow::anyhow!("Invalid duration"))?;
@@ -115,7 +119,11 @@ async fn main() -> anyhow::Result<()> {
         "json" => OutputFormat::Json,
         "csv" => OutputFormat::Csv,
         "html" => OutputFormat::Html,
-        _ => return Err(anyhow::anyhow!("Invalid output format. Use: json, csv, or html")),
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Invalid output format. Use: json, csv, or html"
+            ))
+        }
     };
 
     let mut config = TestConfig::default();
@@ -125,10 +133,13 @@ async fn main() -> anyhow::Result<()> {
     config.reporting.output_format = output_format;
     config.reporting.output_path = output_path.clone();
 
-    info!("Starting client with config: server={}, users={}, duration={:?}", 
-          server_addr, concurrent_users, config.duration);
+    info!(
+        "Starting client with config: server={}, users={}, duration={:?}",
+        server_addr, concurrent_users, config.duration
+    );
 
     let metrics = Arc::new(MetricsCollector::new());
+    metrics.set_total_users(concurrent_users);
     let simulator = UserSimulator::new(config.clone(), metrics.clone());
 
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
@@ -149,9 +160,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let simulation_task = tokio::spawn(async move {
-        simulator.run_simulation().await
-    });
+    let simulation_task = tokio::spawn(async move { simulator.run_simulation().await });
 
     if no_tui {
         info!("Running in headless mode. Press Ctrl+C to stop.");
@@ -177,9 +186,9 @@ async fn main() -> anyhow::Result<()> {
                 libc::close(null_fd);
             }
         }
-        
+
         let mut tui = ClientTui::new(metrics.clone(), log_buffer.clone());
-        
+
         tokio::select! {
             result = simulation_task => {
                 match result {
@@ -212,7 +221,7 @@ async fn generate_test_report(
     metrics: &Arc<MetricsCollector>,
     config: &TestConfig,
 ) -> anyhow::Result<()> {
-    let connections: Vec<_> = metrics.connections.read().values().cloned().collect();
+    let connections: Vec<_> = metrics.connections.iter().map(|f| f.clone()).collect();
     let throughput_samples: Vec<_> = metrics.throughput_history.read().clone();
     let latency_samples: Vec<_> = metrics.latency_history.read().clone();
     let error_samples: Vec<_> = metrics.error_history.read().clone();
@@ -225,15 +234,20 @@ async fn generate_test_report(
         config.reporting.include_raw_data,
     );
 
-    report.export(&config.reporting.output_format, &config.reporting.output_path)?;
+    report.export(
+        &config.reporting.output_format,
+        &config.reporting.output_path,
+    )?;
 
-    info!("Test report generated: {}.{}", 
-          config.reporting.output_path,
-          match config.reporting.output_format {
-              OutputFormat::Json => "json",
-              OutputFormat::Csv => "csv",
-              OutputFormat::Html => "html",
-          });
+    info!(
+        "Test report generated: {}.{}",
+        config.reporting.output_path,
+        match config.reporting.output_format {
+            OutputFormat::Json => "json",
+            OutputFormat::Csv => "csv",
+            OutputFormat::Html => "html",
+        }
+    );
 
     Ok(())
 }

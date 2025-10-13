@@ -9,10 +9,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols,
     text::{Line, Span},
-    widgets::{
-        Axis, Block, Borders, Chart, Dataset, Gauge, List, ListItem, Paragraph, 
-        Sparkline,
-    },
+    widgets::{Axis, Block, Borders, Chart, Dataset, Gauge, List, ListItem, Paragraph, Sparkline},
     Frame, Terminal,
 };
 use shared::{LogBuffer, MetricsCollector};
@@ -50,7 +47,7 @@ impl ClientTui {
     pub async fn run(&mut self) -> anyhow::Result<()> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        
+
         // Completely redirect stderr to null in TUI mode to prevent any leakage
         let _stderr_redirect = std::fs::OpenOptions::new()
             .write(true)
@@ -58,7 +55,7 @@ impl ClientTui {
             .truncate(true)
             .open("/dev/null")
             .ok();
-            
+
         execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
@@ -135,17 +132,12 @@ impl ClientTui {
         }
 
         if let Some(latency) = self.metrics.get_latest_latency() {
-            self.latency_history.push((
-                elapsed,
-                latency.tcp_latency_ms.max(latency.udp_latency_ms),
-            ));
+            self.latency_history.push((elapsed, latency.tcp_latency_ms));
         }
 
         if let Some(errors) = self.metrics.get_latest_errors() {
-            self.error_history.push((
-                elapsed,
-                (errors.tcp_errors + errors.udp_errors) as f64,
-            ));
+            self.error_history
+                .push((elapsed, (errors.tcp_errors + errors.udp_errors) as f64));
         }
 
         const MAX_HISTORY_SIZE: usize = 120;
@@ -186,7 +178,7 @@ impl ClientTui {
 
         self.render_header(f, chunks[0]);
         self.render_connection_stats(f, chunks[1]);
-        
+
         if self.show_logs {
             self.render_charts(f, chunks[2]);
             self.render_logs(f, chunks[3]);
@@ -199,27 +191,51 @@ impl ClientTui {
 
     fn render_header(&self, f: &mut Frame, area: Rect) {
         let elapsed = self.start_time.elapsed();
-        let header = Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled("NPT Client Dashboard", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::raw("  |  "),
-                Span::styled(format!("Runtime: {:02}:{:02}:{:02}", 
+        let active_users = self.metrics.get_active_users();
+        let total_users = self.metrics.get_total_users();
+
+        let header = Paragraph::new(vec![Line::from(vec![
+            Span::styled(
+                "NPT Client Dashboard",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  |  "),
+            Span::styled(
+                format!(
+                    "Runtime: {:02}:{:02}:{:02}",
                     elapsed.as_secs() / 3600,
                     (elapsed.as_secs() % 3600) / 60,
                     elapsed.as_secs() % 60
-                ), Style::default().fg(Color::Green)),
-            ])
-        ])
+                ),
+                Style::default().fg(Color::Green),
+            ),
+            Span::raw("  |  "),
+            Span::styled(
+                format!("Users: {}/{}", active_users, total_users),
+                Style::default().fg(Color::Cyan),
+            ),
+        ])])
         .block(Block::default().borders(Borders::ALL).title("Status"))
         .style(Style::default().fg(Color::White));
-        
+
         f.render_widget(header, area);
     }
 
     fn render_connection_stats(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(25), Constraint::Percentage(25), Constraint::Percentage(25), Constraint::Percentage(25)].as_ref())
+            .constraints(
+                [
+                    Constraint::Percentage(20),
+                    Constraint::Percentage(20),
+                    Constraint::Percentage(20),
+                    Constraint::Percentage(20),
+                    Constraint::Percentage(20),
+                ]
+                .as_ref(),
+            )
             .split(area);
 
         let web_browsing_tasks = self.metrics.get_active_web_browsing_tasks();
@@ -252,18 +268,39 @@ impl ClientTui {
 
         let latest_throughput = self.metrics.get_latest_throughput();
         let current_mbps = if let Some(tp) = latest_throughput {
-            (tp.tcp_upload_bps + tp.tcp_download_bps + tp.udp_upload_bps + tp.udp_download_bps) as f64 / 1_000_000.0
+            (tp.tcp_upload_bps + tp.tcp_download_bps + tp.udp_upload_bps + tp.udp_download_bps)
+                as f64
+                / 1_000_000.0
         } else {
             0.0
         };
 
         let throughput_gauge = Gauge::default()
-            .block(Block::default().borders(Borders::ALL).title("Current Throughput"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Current Throughput"),
+            )
             .gauge_style(Style::default().fg(Color::Yellow))
             .percent(std::cmp::min(current_mbps as u16, 100))
             .label(format!("{:.2} Mbps", current_mbps));
 
         f.render_widget(throughput_gauge, chunks[3]);
+
+        let latest_errors = self.metrics.get_latest_errors();
+        let error_count = if let Some(errors) = latest_errors {
+            errors.tcp_errors + errors.udp_errors
+        } else {
+            0
+        };
+
+        let error_gauge = Gauge::default()
+            .block(Block::default().borders(Borders::ALL).title("Total Errors"))
+            .gauge_style(Style::default().fg(Color::Red))
+            .percent(std::cmp::min(error_count as u16, 100))
+            .label(format!("{}", error_count));
+
+        f.render_widget(error_gauge, chunks[4]);
     }
 
     fn render_charts(&self, f: &mut Frame, area: Rect) {
@@ -291,25 +328,37 @@ impl ClientTui {
     fn render_throughput_chart(&self, f: &mut Frame, area: Rect) {
         if self.throughput_history.is_empty() {
             let empty_chart = Paragraph::new("No throughput data available")
-                .block(Block::default().borders(Borders::ALL).title("Throughput (Mbps)"))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Throughput (Mbps)"),
+                )
                 .style(Style::default().fg(Color::Gray));
             f.render_widget(empty_chart, area);
             return;
         }
 
-        let tcp_upload_data: Vec<(f64, f64)> = self.throughput_history.iter()
+        let tcp_upload_data: Vec<(f64, f64)> = self
+            .throughput_history
+            .iter()
             .map(|(time, upload, _, _)| (*time, *upload))
             .collect();
 
-        let tcp_download_data: Vec<(f64, f64)> = self.throughput_history.iter()
+        let tcp_download_data: Vec<(f64, f64)> = self
+            .throughput_history
+            .iter()
             .map(|(time, _, download, _)| (*time, *download))
             .collect();
 
-        let udp_data: Vec<(f64, f64)> = self.throughput_history.iter()
+        let udp_data: Vec<(f64, f64)> = self
+            .throughput_history
+            .iter()
             .map(|(time, _, _, udp)| (*time, *udp))
             .collect();
 
-        let max_throughput = self.throughput_history.iter()
+        let max_throughput = self
+            .throughput_history
+            .iter()
             .map(|(_, upload, download, udp)| upload + download + udp)
             .fold(0.0f64, f64::max)
             .max(1.0);
@@ -336,7 +385,11 @@ impl ClientTui {
         let max_time = self.throughput_history.last().map(|x| x.0).unwrap_or(1.0);
 
         let chart = Chart::new(datasets)
-            .block(Block::default().borders(Borders::ALL).title("Throughput (Mbps)"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Throughput (Mbps)"),
+            )
             .x_axis(
                 Axis::default()
                     .title("Time (s)")
@@ -345,7 +398,7 @@ impl ClientTui {
                     .labels(vec![
                         Span::styled(format!("{:.0}", min_time), Style::default()),
                         Span::styled(format!("{:.0}", max_time), Style::default()),
-                    ])
+                    ]),
             )
             .y_axis(
                 Axis::default()
@@ -355,7 +408,7 @@ impl ClientTui {
                     .labels(vec![
                         Span::styled("0", Style::default()),
                         Span::styled(format!("{:.1}", max_throughput), Style::default()),
-                    ])
+                    ]),
             );
 
         f.render_widget(chart, area);
@@ -370,18 +423,18 @@ impl ClientTui {
             return;
         }
 
-        let max_latency = self.latency_history.iter()
+        let max_latency = self
+            .latency_history
+            .iter()
             .map(|(_, latency)| *latency)
             .fold(0.0f64, f64::max)
             .max(1.0);
 
-        let dataset = vec![
-            Dataset::default()
-                .name("Latency")
-                .marker(symbols::Marker::Braille)
-                .style(Style::default().fg(Color::Yellow))
-                .data(&self.latency_history),
-        ];
+        let dataset = vec![Dataset::default()
+            .name("Latency")
+            .marker(symbols::Marker::Braille)
+            .style(Style::default().fg(Color::Yellow))
+            .data(&self.latency_history)];
 
         let min_time = self.latency_history.first().map(|x| x.0).unwrap_or(0.0);
         let max_time = self.latency_history.last().map(|x| x.0).unwrap_or(1.0);
@@ -392,7 +445,7 @@ impl ClientTui {
                 Axis::default()
                     .title("Time (s)")
                     .style(Style::default().fg(Color::Gray))
-                    .bounds([min_time, max_time])
+                    .bounds([min_time, max_time]),
             )
             .y_axis(
                 Axis::default()
@@ -402,7 +455,7 @@ impl ClientTui {
                     .labels(vec![
                         Span::styled("0", Style::default()),
                         Span::styled(format!("{:.1}", max_latency), Style::default()),
-                    ])
+                    ]),
             );
 
         f.render_widget(chart, area);
@@ -417,55 +470,72 @@ impl ClientTui {
             return;
         }
 
-        let max_errors = self.error_history.iter()
+        let max_errors = self
+            .error_history
+            .iter()
             .map(|(_, errors)| *errors)
             .fold(0.0f64, f64::max)
             .max(1.0);
 
-        let dataset = vec![
-            Dataset::default()
-                .name("Errors")
-                .marker(symbols::Marker::Braille)
-                .style(Style::default().fg(Color::Red))
-                .data(&self.error_history),
-        ];
+        let dataset = vec![Dataset::default()
+            .name("Errors")
+            .marker(symbols::Marker::Braille)
+            .style(Style::default().fg(Color::Red))
+            .data(&self.error_history)];
 
         let min_time = self.error_history.first().map(|x| x.0).unwrap_or(0.0);
         let max_time = self.error_history.last().map(|x| x.0).unwrap_or(1.0);
 
         let chart = Chart::new(dataset)
-            .block(Block::default().borders(Borders::ALL).title("Cumulative Errors"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Cumulative Errors"),
+            )
             .x_axis(
                 Axis::default()
                     .title("Time (s)")
                     .style(Style::default().fg(Color::Gray))
-                    .bounds([min_time, max_time])
+                    .bounds([min_time, max_time]),
             )
             .y_axis(
                 Axis::default()
                     .title("Count")
                     .style(Style::default().fg(Color::Gray))
-                    .bounds([0.0, max_errors])
+                    .bounds([0.0, max_errors]),
             );
 
         f.render_widget(chart, area);
     }
 
     fn render_connection_sparkline(&self, f: &mut Frame, area: Rect) {
-        let connection_data: Vec<u64> = self.throughput_history.iter()
-            .map(|_| (self.metrics.get_active_tcp_connections() + self.metrics.get_active_udp_connections()) as u64)
+        let connection_data: Vec<u64> = self
+            .throughput_history
+            .iter()
+            .map(|_| {
+                (self.metrics.get_active_tcp_connections()
+                    + self.metrics.get_active_udp_connections()) as u64
+            })
             .collect();
 
         if connection_data.is_empty() {
             let empty_sparkline = Paragraph::new("No connection data")
-                .block(Block::default().borders(Borders::ALL).title("Connection History"))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Connection History"),
+                )
                 .style(Style::default().fg(Color::Gray));
             f.render_widget(empty_sparkline, area);
             return;
         }
 
         let sparkline = Sparkline::default()
-            .block(Block::default().borders(Borders::ALL).title("Connection History"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Connection History"),
+            )
             .data(&connection_data)
             .style(Style::default().fg(Color::Cyan));
 
@@ -475,16 +545,18 @@ impl ClientTui {
     fn render_logs(&self, f: &mut Frame, area: Rect) {
         let log_entries = self.log_buffer.get_entries();
         let total_logs = log_entries.len();
-        
+
         let visible_logs = 8; // Number of log lines to show
         let start_index = if total_logs > visible_logs {
             let max_scroll = total_logs.saturating_sub(visible_logs);
             let scroll = self.log_scroll.min(max_scroll);
-            total_logs.saturating_sub(visible_logs).saturating_sub(scroll)
+            total_logs
+                .saturating_sub(visible_logs)
+                .saturating_sub(scroll)
         } else {
             0
         };
-        
+
         let displayed_logs: Vec<ListItem> = log_entries
             .iter()
             .skip(start_index)
@@ -493,7 +565,7 @@ impl ClientTui {
                 let time_str = entry.timestamp.format("%H:%M:%S").to_string();
                 let level_symbol = entry.level_symbol();
                 let (r, g, b) = entry.level_color();
-                
+
                 let line = Line::from(vec![
                     Span::styled(
                         format!("{} ", time_str),
@@ -503,27 +575,24 @@ impl ClientTui {
                         format!("{} ", level_symbol),
                         Style::default().fg(Color::Rgb(r, g, b)),
                     ),
-                    Span::styled(
-                        entry.message.clone(),
-                        Style::default().fg(Color::White),
-                    ),
+                    Span::styled(entry.message.clone(), Style::default().fg(Color::White)),
                 ]);
                 ListItem::new(line)
             })
             .collect();
 
         let title = if total_logs > visible_logs {
-            format!("Logs ({}/{}) - ↑↓ to scroll", 
-                   start_index + displayed_logs.len().min(visible_logs), 
-                   total_logs)
+            format!(
+                "Logs ({}/{}) - ↑↓ to scroll",
+                start_index + displayed_logs.len().min(visible_logs),
+                total_logs
+            )
         } else {
             format!("Logs ({})", total_logs)
         };
 
         let list = List::new(displayed_logs)
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .title(title))
+            .block(Block::default().borders(Borders::ALL).title(title))
             .style(Style::default().fg(Color::White));
 
         f.render_widget(list, area);
@@ -535,11 +604,11 @@ impl ClientTui {
         } else {
             "Press 'q' to quit | 'L' to show logs"
         };
-        
+
         let footer = Paragraph::new(instructions)
             .block(Block::default().borders(Borders::ALL))
             .style(Style::default().fg(Color::White));
-        
+
         f.render_widget(footer, area);
     }
 }

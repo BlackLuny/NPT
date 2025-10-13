@@ -78,13 +78,13 @@ impl Default for TestConfig {
 impl Default for UserBehaviorConfig {
     fn default() -> Self {
         Self {
-            think_time_range: (Duration::from_millis(100), Duration::from_secs(60)),
+            think_time_range: (Duration::from_millis(100), Duration::from_secs(10)),
             connection_interval_range: (Duration::from_millis(50), Duration::from_secs(2)),
             activity_weights: ActivityWeights {
                 web_browsing: 0.98,
-                file_download: 0.005,
-                file_upload: 0.002,
-                gaming: 0.005,
+                file_download: 0.000,
+                file_upload: 0.000,
+                gaming: 0.000,
             },
             tcp_settings: TcpSettings::default(),
             udp_settings: UdpSettings::default(),

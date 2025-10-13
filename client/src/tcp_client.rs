@@ -1,6 +1,7 @@
 use rand::Rng;
 use shared::{ConnectionType, Message, MessageType, MetricsCollector, UserActivity};
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -21,23 +22,37 @@ impl TcpClient {
         }
     }
 
-    pub async fn simulate_user_activity(&self, activity: UserActivity) -> anyhow::Result<()> {
+    pub fn get_metrics(&self) -> Arc<MetricsCollector> {
+        self.metrics.clone()
+    }
+
+    pub async fn simulate_user_activity(
+        &self,
+        activity: UserActivity,
+        stoped: Arc<AtomicBool>,
+    ) -> anyhow::Result<()> {
         match activity {
             UserActivity::WebBrowsing {
                 pages_to_visit,
                 requests_per_page,
             } => {
-                self.simulate_web_browsing(pages_to_visit, requests_per_page)
+                self.simulate_web_browsing(pages_to_visit, requests_per_page, stoped)
                     .await
             }
             UserActivity::FileDownload {
                 file_size,
                 chunk_size,
-            } => self.simulate_file_download(file_size, chunk_size).await,
+            } => {
+                self.simulate_file_download(file_size, chunk_size, stoped)
+                    .await
+            }
             UserActivity::FileUpload {
                 file_size,
                 chunk_size,
-            } => self.simulate_file_upload(file_size, chunk_size).await,
+            } => {
+                self.simulate_file_upload(file_size, chunk_size, stoped)
+                    .await
+            }
             _ => Err(anyhow::anyhow!("TCP client cannot handle UDP activities")),
         }
     }
@@ -46,19 +61,23 @@ impl TcpClient {
         &self,
         pages_to_visit: u32,
         requests_per_page: (u32, u32),
+        stoped: Arc<AtomicBool>,
     ) -> anyhow::Result<()> {
         for _page in 0..pages_to_visit {
             let connection_id = Uuid::new_v4();
             let session_id = Uuid::new_v4();
 
-            self.metrics
-                .start_connection_with_activity(connection_id, ConnectionType::Tcp, UserActivity::WebBrowsing {
+            self.metrics.start_connection_with_activity(
+                connection_id,
+                ConnectionType::Tcp,
+                UserActivity::WebBrowsing {
                     pages_to_visit,
                     requests_per_page,
-                });
+                },
+            );
 
             match self
-                .simulate_single_page(connection_id, session_id, requests_per_page)
+                .simulate_single_page(connection_id, session_id, requests_per_page, stoped.clone())
                 .await
             {
                 Ok(_) => {}
@@ -70,7 +89,7 @@ impl TcpClient {
 
             self.metrics.end_connection(&connection_id);
 
-            let think_time = Duration::from_millis(rand::thread_rng().gen_range(1000..10000));
+            let think_time = Duration::from_millis(rand::thread_rng().gen_range(100..500));
             tokio::time::sleep(think_time).await;
         }
 
@@ -82,6 +101,7 @@ impl TcpClient {
         connection_id: Uuid,
         session_id: Uuid,
         requests_per_page: (u32, u32),
+        stoped: Arc<AtomicBool>,
     ) -> anyhow::Result<()> {
         let mut stream = TcpStream::connect(self.server_addr).await?;
 
@@ -108,7 +128,7 @@ impl TcpClient {
         let num_requests = rand::thread_rng().gen_range(requests_per_page.0..=requests_per_page.1);
 
         for request_num in 0..num_requests {
-            let request_size = rand::thread_rng().gen_range(1024..=32*1024);
+            let request_size = rand::thread_rng().gen_range(1024..=32 * 1024);
             let request_data = vec![0u8; request_size];
             let http_request = Message::new(MessageType::HttpRequest, request_data, session_id)
                 .with_sequence(request_num as u64);
@@ -126,9 +146,9 @@ impl TcpClient {
             self.metrics
                 .record_bytes_received(&connection_id, response.payload.len() as u64);
             drop(response);
-
-            let inter_request_delay = Duration::from_millis(rand::thread_rng().gen_range(10..500));
-            tokio::time::sleep(inter_request_delay).await;
+            if stoped.load(Ordering::Relaxed) {
+                break;
+            }
         }
 
         let close_msg = Message::new(MessageType::ConnectionClose, vec![], session_id);
@@ -141,18 +161,22 @@ impl TcpClient {
         &self,
         file_size: u64,
         chunk_size: (u32, u32),
+        stoped: Arc<AtomicBool>,
     ) -> anyhow::Result<()> {
         let connection_id = Uuid::new_v4();
         let session_id = Uuid::new_v4();
 
-        self.metrics
-            .start_connection_with_activity(connection_id, ConnectionType::Tcp, UserActivity::FileDownload {
+        self.metrics.start_connection_with_activity(
+            connection_id,
+            ConnectionType::Tcp,
+            UserActivity::FileDownload {
                 file_size,
                 chunk_size,
-            });
+            },
+        );
 
         match self
-            .perform_file_download(connection_id, session_id, file_size, chunk_size)
+            .perform_file_download(connection_id, session_id, file_size, chunk_size, stoped)
             .await
         {
             Ok(_) => {}
@@ -172,6 +196,7 @@ impl TcpClient {
         session_id: Uuid,
         file_size: u64,
         _chunk_size: (u32, u32),
+        stoped: Arc<AtomicBool>,
     ) -> anyhow::Result<()> {
         let mut stream = TcpStream::connect(self.server_addr).await?;
 
@@ -203,7 +228,7 @@ impl TcpClient {
                 self.metrics.record_latency(&connection_id, initial_latency);
             }
 
-            if bytes_received >= file_size {
+            if bytes_received >= file_size || stoped.load(Ordering::Relaxed) {
                 break;
             }
         }
@@ -218,18 +243,22 @@ impl TcpClient {
         &self,
         file_size: u64,
         chunk_size: (u32, u32),
+        stoped: Arc<AtomicBool>,
     ) -> anyhow::Result<()> {
         let connection_id = Uuid::new_v4();
         let session_id = Uuid::new_v4();
 
-        self.metrics
-            .start_connection_with_activity(connection_id, ConnectionType::Tcp, UserActivity::FileUpload {
+        self.metrics.start_connection_with_activity(
+            connection_id,
+            ConnectionType::Tcp,
+            UserActivity::FileUpload {
                 file_size,
                 chunk_size,
-            });
+            },
+        );
 
         match self
-            .perform_file_upload(connection_id, session_id, file_size, chunk_size)
+            .perform_file_upload(connection_id, session_id, file_size, chunk_size, stoped)
             .await
         {
             Ok(_) => {}
@@ -249,6 +278,7 @@ impl TcpClient {
         session_id: Uuid,
         file_size: u64,
         chunk_size: (u32, u32),
+        stoped: Arc<AtomicBool>,
     ) -> anyhow::Result<()> {
         let mut stream = TcpStream::connect(self.server_addr).await?;
 
@@ -276,9 +306,6 @@ impl TcpClient {
         let mut bytes_sent = 0u64;
         let mut sequence = 0u64;
 
-        const BUFFER_SIZE: usize = 8192;
-        let mut buffer = vec![0u8; BUFFER_SIZE];
-
         while bytes_sent < file_size {
             let current_chunk_size = std::cmp::min(
                 rand::thread_rng().gen_range(chunk_size.0..=chunk_size.1) as u64,
@@ -289,11 +316,11 @@ impl TcpClient {
             self.send_chunk_streaming(
                 &mut stream,
                 current_chunk_size,
-                &mut buffer,
                 session_id,
                 sequence,
                 &connection_id,
-            ).await?;
+            )
+            .await?;
 
             let ack = self.receive_response(&mut stream).await?;
             let chunk_latency = chunk_start.elapsed();
@@ -305,8 +332,9 @@ impl TcpClient {
             bytes_sent += current_chunk_size as u64;
             sequence += 1;
 
-            let inter_chunk_delay = Duration::from_millis(rand::thread_rng().gen_range(1..50));
-            tokio::time::sleep(inter_chunk_delay).await;
+            if stoped.load(Ordering::Relaxed) {
+                break;
+            }
         }
 
         let close_msg = Message::new(MessageType::ConnectionClose, vec![], session_id);
@@ -319,26 +347,19 @@ impl TcpClient {
         &self,
         stream: &mut TcpStream,
         total_size: usize,
-        buffer: &mut [u8],
         session_id: Uuid,
         sequence: u64,
         connection_id: &Uuid,
     ) -> anyhow::Result<()> {
-        let mut remaining = total_size;
-        let mut chunk_data = Vec::new();
-
-        while remaining > 0 {
-            let chunk_size = std::cmp::min(buffer.len(), remaining);
-            chunk_data.extend_from_slice(&buffer[..chunk_size]);
-            remaining -= chunk_size;
-        }
+        let chunk_data = vec![0u8; total_size];
 
         let chunk_msg = Message::new(MessageType::FileUploadChunk, chunk_data, session_id)
             .with_sequence(sequence);
 
         self.send_message(stream, &chunk_msg).await?;
         self.metrics.record_packet_sent(connection_id);
-        self.metrics.record_bytes_sent(connection_id, total_size as u64);
+        self.metrics
+            .record_bytes_sent(connection_id, total_size as u64);
 
         Ok(())
     }

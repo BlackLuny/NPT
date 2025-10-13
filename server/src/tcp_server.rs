@@ -2,7 +2,7 @@ use rand::Rng;
 use shared::{ConnectionType, Message, MessageType, MetricsCollector};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
@@ -73,6 +73,7 @@ impl TcpServer {
                     {
                         Ok(should_continue) => {
                             let response_time = request_start.elapsed();
+                            tracing::info!("Response time: {:?}", response_time);
                             metrics.record_latency(&connection_id, response_time);
 
                             if !should_continue {
@@ -87,7 +88,7 @@ impl TcpServer {
                     }
                 }
                 Err(e) => {
-                    if e.to_string().contains("EOF") {
+                    if e.to_string().to_lowercase().contains("eof") {
                         tracing::debug!("Client disconnected: {}", addr);
                     } else {
                         tracing::warn!("Error receiving message from {}: {}", addr, e);
@@ -206,11 +207,11 @@ impl TcpServer {
         metrics: &Arc<MetricsCollector>,
         connection_id: &Uuid,
     ) -> anyhow::Result<()> {
-        let chunk_size = rand::thread_rng().gen_range(4096..=65536);
         let mut bytes_sent = 0u64;
         let mut sequence = 0u64;
 
         while bytes_sent < file_size {
+            let chunk_size = rand::thread_rng().gen_range(4096..=65536);
             let current_chunk_size =
                 std::cmp::min(chunk_size as u64, file_size - bytes_sent) as usize;
 
@@ -226,9 +227,6 @@ impl TcpServer {
 
             bytes_sent += current_chunk_size as u64;
             sequence += 1;
-
-            let delay = Duration::from_millis(rand::thread_rng().gen_range(1..=10));
-            tokio::time::sleep(delay).await;
         }
 
         Ok(())

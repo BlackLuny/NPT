@@ -42,7 +42,7 @@ impl UdpClient {
             packet_size_range,
         });
         
-        let session_duration = Duration::from_secs(rand::thread_rng().gen_range(10..=300));
+        let session_duration = Duration::from_secs(rand::thread_rng().gen_range(10..=100));
         let packet_interval = Duration::from_nanos(1_000_000_000 / packets_per_second as u64);
         
         let socket = UdpSocket::bind("0.0.0.0:0").await?;
