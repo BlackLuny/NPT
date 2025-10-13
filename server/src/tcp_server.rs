@@ -73,7 +73,14 @@ impl TcpServer {
                     {
                         Ok(should_continue) => {
                             let response_time = request_start.elapsed();
-                            tracing::info!("Response time: {:?}", response_time);
+                            if response_time.as_millis() > 1000 {
+                                tracing::info!(
+                                    "Response time: {:?} large message payload length: {:?} message type: {:?}",
+                                    response_time,
+                                    message.payload.len(),
+                                    message.message_type
+                                );
+                            }
                             metrics.record_latency(&connection_id, response_time);
 
                             if !should_continue {
@@ -130,7 +137,7 @@ impl TcpServer {
                 Ok(true)
             }
             MessageType::HttpRequest => {
-                let response_size = rand::thread_rng().gen_range(4096..=512 * 1024);
+                let response_size = rand::thread_rng().gen_range(4096..=32 * 1024);
 
                 Self::send_large_response_streaming(
                     stream,

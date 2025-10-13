@@ -128,7 +128,7 @@ impl TcpClient {
         let num_requests = rand::thread_rng().gen_range(requests_per_page.0..=requests_per_page.1);
 
         for request_num in 0..num_requests {
-            let request_size = rand::thread_rng().gen_range(1024..=32 * 1024);
+            let request_size = rand::thread_rng().gen_range(1024..= 4*1024);
             let request_data = vec![0u8; request_size];
             let http_request = Message::new(MessageType::HttpRequest, request_data, session_id)
                 .with_sequence(request_num as u64);
