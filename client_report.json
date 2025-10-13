@@ -1,0 +1,98 @@
+{
+  "summary": {
+    "test_duration": {
+      "secs": 53,
+      "nanos": 740083000
+    },
+    "start_time": "2025-10-09T15:16:07.705085Z",
+    "end_time": "2025-10-09T15:17:01.445168Z",
+    "total_connections": 1383,
+    "successful_connections": 1221,
+    "failed_connections": 162,
+    "total_bytes_sent": 6681264497,
+    "total_bytes_received": 30350716867,
+    "total_packets_sent": 131074,
+    "total_packets_received": 84786
+  },
+  "performance": {
+    "avg_throughput_mbps": 10215.718996965517,
+    "peak_throughput_mbps": 6310.072408,
+    "avg_latency_ms": 34.7397382154162,
+    "p50_latency_ms": 0.0,
+    "p95_latency_ms": 219.0,
+    "p99_latency_ms": 356.5599999999977,
+    "error_rate": 0.0,
+    "connections_per_second": 47.689655172413794
+  },
+  "connections": {
+    "tcp_connections": 1307,
+    "udp_connections": 76,
+    "avg_connection_duration": {
+      "secs": 4,
+      "nanos": 692514245
+    },
+    "max_connection_duration": {
+      "secs": 29,
+      "nanos": 115384000
+    },
+    "min_connection_duration": {
+      "secs": 0,
+      "nanos": 53922000
+    }
+  },
+  "throughput": {
+    "tcp_upload": {
+      "avg_bps": 116479050,
+      "peak_bps": 148965934,
+      "min_bps": 86062719,
+      "total_bytes": 6173389695
+    },
+    "tcp_download": {
+      "avg_bps": 564531216,
+      "peak_bps": 646399154,
+      "min_bps": 434379344,
+      "total_bytes": 29920154495
+    },
+    "udp_upload": {
+      "avg_bps": 7886011,
+      "peak_bps": 19340261,
+      "min_bps": 2327458,
+      "total_bytes": 417958608
+    },
+    "udp_download": {
+      "avg_bps": 268202,
+      "peak_bps": 667717,
+      "min_bps": 74726,
+      "total_bytes": 14214717
+    }
+  },
+  "latency": {
+    "tcp": {
+      "avg_ms": 125.63601799866673,
+      "p50_ms": 132.2429918777229,
+      "p95_ms": 136.70296558344864,
+      "p99_ms": 137.31866607440438,
+      "max_ms": 137.43222130245215,
+      "min_ms": 0.0
+    },
+    "udp": {
+      "avg_ms": 0.5171430329139246,
+      "p50_ms": 0.3124694757960039,
+      "p95_ms": 1.879953459748531,
+      "p99_ms": 1.9610855463417676,
+      "max_ms": 2.010900138800731,
+      "min_ms": 0.0
+    }
+  },
+  "errors": {
+    "total_errors": 0,
+    "tcp_errors": 0,
+    "udp_errors": 0,
+    "error_rate": 0.0,
+    "error_distribution": {
+      "udp_errors": 0,
+      "tcp_errors": 0
+    }
+  },
+  "raw_data": null
+}

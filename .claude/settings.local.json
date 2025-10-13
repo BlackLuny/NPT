@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo build:*)",
+      "Bash(./target/release/server --help)",
+      "Bash(./target/release/client --help)"
+    ],
+    "deny": []
+  }
+}
