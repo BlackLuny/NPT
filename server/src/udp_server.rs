@@ -81,7 +81,7 @@ impl UdpServer {
         sessions: Arc<RwLock<HashMap<SocketAddr, UdpSession>>>,
         metrics: Arc<MetricsCollector>,
     ) -> anyhow::Result<()> {
-        let message: Message = serde_json::from_slice(&packet_data)?;
+        let message: Message = rmp_serde::from_slice(&packet_data)?;
         
         let _session_id = {
             let mut sessions_write = sessions.write();
@@ -142,7 +142,7 @@ impl UdpServer {
             let response = Message::new(MessageType::GamePacket, response_data, message.session_id)
                 .with_sequence(message.sequence);
             
-            let response_packet = serde_json::to_vec(&response)?;
+            let response_packet = rmp_serde::to_vec(&response)?;
             socket.send_to(&response_packet, addr).await?;
             
             if let Some(session) = sessions.read().get(&addr) {

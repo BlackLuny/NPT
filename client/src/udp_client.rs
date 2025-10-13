@@ -123,7 +123,7 @@ impl UdpClient {
         let send_start = Instant::now();
         
         for fragment in fragments {
-            let serialized = serde_json::to_vec(&fragment)?;
+            let serialized = rmp_serde::to_vec(&fragment)?;
             socket.send(&serialized).await?;
             
             self.metrics.record_packet_sent(connection_id);
@@ -147,7 +147,7 @@ impl UdpClient {
             let (size, _) = socket.recv_from(&mut buf).await?;
             buf.truncate(size);
             
-            let _response: Message = serde_json::from_slice(&buf)?;
+            let _response: Message = rmp_serde::from_slice(&buf)?;
             
             self.metrics.record_packet_received(connection_id);
             self.metrics.record_bytes_received(connection_id, size as u64);
@@ -176,7 +176,7 @@ impl UdpClient {
     }
 
     fn fragment_packet(&self, packet: &Message, mtu: usize) -> anyhow::Result<Vec<Message>> {
-        let serialized = serde_json::to_vec(packet)?;
+        let serialized = rmp_serde::to_vec(packet)?;
         
         if serialized.len() <= mtu {
             return Ok(vec![packet.clone()]);
@@ -194,7 +194,7 @@ impl UdpClient {
                 is_last: i == total_chunks - 1,
             };
             
-            let mut fragment_data = serde_json::to_vec(&fragment_header)?;
+            let mut fragment_data = rmp_serde::to_vec(&fragment_header)?;
             fragment_data.extend_from_slice(chunk);
             
             let fragment_msg = Message::new(

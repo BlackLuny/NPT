@@ -428,7 +428,7 @@ impl TcpClient {
         stream: &mut TcpStream,
         message: &Message,
     ) -> anyhow::Result<usize> {
-        let serialized = serde_json::to_vec(message)?;
+        let serialized = rmp_serde::to_vec(message)?;
         let length = serialized.len() as u32;
 
         stream.write_all(&length.to_le_bytes()).await?;
@@ -489,7 +489,7 @@ impl TcpClient {
         )
         .await??;
 
-        let message: Message = serde_json::from_slice(&message_buf)?;
+        let message: Message = rmp_serde::from_slice(&message_buf)?;
         Ok((message, length))
     }
 }

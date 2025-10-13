@@ -318,7 +318,7 @@ impl TcpServer {
     }
 
     async fn send_message(stream: &mut TcpStream, message: Message) -> anyhow::Result<()> {
-        let serialized = serde_json::to_vec(&message)?;
+        let serialized = rmp_serde::to_vec(&message)?;
         drop(message);
         let length = serialized.len() as u32;
 
@@ -350,7 +350,7 @@ impl TcpServer {
         )
         .await??;
 
-        let message: Message = serde_json::from_slice(&message_buf)?;
+        let message: Message = rmp_serde::from_slice(&message_buf)?;
         Ok(message)
     }
 }
