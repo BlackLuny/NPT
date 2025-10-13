@@ -1,4 +1,4 @@
-use shared::{Message, MessageType, UserActivity, ConnectionType, MetricsCollector};
+use shared::{Message, MessageType, UserActivity, ConnectionType, MetricsCollector, ErrorType};
 use rand::Rng;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -58,8 +58,25 @@ impl UdpClient {
             match self.send_game_packet(&socket, &connection_id, session_id, packet_sequence, packet_size).await {
                 Ok(_) => {}
                 Err(e) => {
+                    let error_type = if e.to_string().contains("connection refused") {
+                        ErrorType::ConnectionFailed
+                    } else if e.to_string().contains("timeout") {
+                        ErrorType::NetworkTimeout
+                    } else if e.to_string().contains("serialization") {
+                        ErrorType::SerializationError
+                    } else if e.to_string().contains("broken pipe") {
+                        ErrorType::UnexpectedDisconnection
+                    } else {
+                        ErrorType::IoError
+                    };
+                    
                     tracing::warn!("Failed to send game packet: {}", e);
-                    self.metrics.record_error(&connection_id);
+                    self.metrics.record_error_with_detail(
+                        &connection_id,
+                        error_type,
+                        e.to_string(),
+                        Some(format!("Gaming - packet seq: {}, size: {}", packet_sequence, packet_size))
+                    );
                 }
             }
             

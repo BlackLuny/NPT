@@ -69,6 +69,44 @@ pub enum UserActivity {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ErrorType {
+    ConnectionFailed,
+    NetworkTimeout,
+    SerializationError,
+    MessageTooLarge,
+    UnexpectedDisconnection,
+    ProtocolError,
+    IoError,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ErrorDetail {
+    pub error_type: ErrorType,
+    pub message: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub connection_id: Uuid,
+    pub context: Option<String>,
+}
+
+impl ErrorDetail {
+    pub fn new(
+        error_type: ErrorType,
+        message: String,
+        connection_id: Uuid,
+        context: Option<String>,
+    ) -> Self {
+        Self {
+            error_type,
+            message,
+            timestamp: chrono::Utc::now(),
+            connection_id,
+            context,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ConnectionInfo {
     pub id: Uuid,

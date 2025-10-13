@@ -88,6 +88,9 @@ pub struct ErrorStats {
     pub udp_errors: u64,
     pub error_rate: f64,
     pub error_distribution: HashMap<String, u64>,
+    pub error_types: HashMap<String, u64>,
+    pub error_details: Vec<crate::ErrorDetail>,
+    pub most_recent_errors: Vec<crate::ErrorDetail>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -362,12 +365,33 @@ impl TestReport {
         error_distribution.insert("tcp_errors".to_string(), tcp_errors);
         error_distribution.insert("udp_errors".to_string(), udp_errors);
 
+        // Collect all error details from connections
+        let mut all_error_details = Vec::new();
+        let mut error_types = HashMap::new();
+        
+        for connection in connections {
+            for error_detail in &connection.error_details {
+                all_error_details.push(error_detail.clone());
+                
+                let error_type_name = format!("{:?}", error_detail.error_type);
+                *error_types.entry(error_type_name).or_insert(0) += 1;
+            }
+        }
+
+        // Get most recent errors (last 10)
+        let mut recent_errors = all_error_details.clone();
+        recent_errors.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        recent_errors.truncate(10);
+
         ErrorStats {
             total_errors,
             tcp_errors,
             udp_errors,
             error_rate,
             error_distribution,
+            error_types,
+            error_details: all_error_details,
+            most_recent_errors: recent_errors,
         }
     }
 
@@ -399,11 +423,53 @@ impl TestReport {
         csv_content.push_str(&format!("p95_latency_ms,{}\n", self.performance.p95_latency_ms));
         csv_content.push_str(&format!("error_rate,{}\n", self.errors.error_rate));
 
+        // Add error type breakdown
+        for (error_type, count) in &self.errors.error_types {
+            csv_content.push_str(&format!("error_type_{},{}\n", error_type, count));
+        }
+
         std::fs::write(format!("{}.csv", path), csv_content)?;
+        
+        // Export detailed errors to separate CSV
+        let mut errors_csv = String::new();
+        errors_csv.push_str("timestamp,error_type,connection_id,message,context\n");
+        for error in &self.errors.most_recent_errors {
+            errors_csv.push_str(&format!(
+                "{},{:?},{},\"{}\",\"{}\"\n",
+                error.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                error.error_type,
+                error.connection_id,
+                error.message.replace('"', "\"\""),
+                error.context.as_deref().unwrap_or("").replace('"', "\"\"")
+            ));
+        }
+        std::fs::write(format!("{}_errors.csv", path), errors_csv)?;
+        
         Ok(())
     }
 
     fn export_html(&self, path: &str) -> anyhow::Result<()> {
+        // Generate error type breakdown HTML
+        let mut error_types_html = String::new();
+        for (error_type, count) in &self.errors.error_types {
+            error_types_html.push_str(&format!(
+                "<tr><td>{}</td><td>{}</td></tr>\n", 
+                error_type, count
+            ));
+        }
+
+        // Generate recent errors HTML
+        let mut recent_errors_html = String::new();
+        for error in &self.errors.most_recent_errors {
+            recent_errors_html.push_str(&format!(
+                "<tr><td>{}</td><td>{:?}</td><td>{}</td><td>{}</td></tr>\n",
+                error.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                error.error_type,
+                error.message,
+                error.context.as_deref().unwrap_or("N/A")
+            ));
+        }
+
         let html_content = format!(
             r#"<!DOCTYPE html>
 <html>
@@ -414,9 +480,10 @@ impl TestReport {
         .summary {{ background-color: #f0f0f0; padding: 20px; border-radius: 5px; }}
         .metric {{ margin: 10px 0; }}
         .section {{ margin: 30px 0; }}
-        table {{ border-collapse: collapse; width: 100%; }}
+        table {{ border-collapse: collapse; width: 100%; margin-top: 15px; }}
         th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
         th {{ background-color: #f2f2f2; }}
+        .error-message {{ max-width: 300px; word-wrap: break-word; }}
     </style>
 </head>
 <body>
@@ -446,6 +513,21 @@ impl TestReport {
             <tr><td>Error Rate</td><td>{:.4}</td></tr>
         </table>
     </div>
+
+    <div class="section">
+        <h2>Error Analysis</h2>
+        <h3>Error Type Distribution</h3>
+        <table>
+            <tr><th>Error Type</th><th>Count</th></tr>
+            {}
+        </table>
+        
+        <h3>Most Recent Errors</h3>
+        <table>
+            <tr><th>Timestamp</th><th>Type</th><th class="error-message">Message</th><th>Context</th></tr>
+            {}
+        </table>
+    </div>
 </body>
 </html>"#,
             self.summary.test_duration,
@@ -460,6 +542,8 @@ impl TestReport {
             self.performance.p95_latency_ms,
             self.performance.p99_latency_ms,
             self.errors.error_rate,
+            error_types_html,
+            recent_errors_html,
         );
 
         std::fs::write(format!("{}.html", path), html_content)?;

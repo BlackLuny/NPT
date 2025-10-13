@@ -1,5 +1,5 @@
 use rand::Rng;
-use shared::{ConnectionType, Message, MessageType, MetricsCollector, UserActivity};
+use shared::{ConnectionType, Message, MessageType, MetricsCollector, UserActivity, ErrorType};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -82,8 +82,23 @@ impl TcpClient {
             {
                 Ok(_) => {}
                 Err(e) => {
+                    let error_type = if e.to_string().contains("connection refused") {
+                        ErrorType::ConnectionFailed
+                    } else if e.to_string().contains("timeout") {
+                        ErrorType::NetworkTimeout
+                    } else if e.to_string().contains("broken pipe") || e.to_string().contains("reset") {
+                        ErrorType::UnexpectedDisconnection
+                    } else {
+                        ErrorType::Other
+                    };
+                    
                     tracing::warn!("Web browsing simulation failed: {}", e);
-                    self.metrics.record_error(&connection_id);
+                    self.metrics.record_error_with_detail(
+                        &connection_id,
+                        error_type,
+                        e.to_string(),
+                        Some(format!("Web browsing - page {}", _page + 1))
+                    );
                 }
             }
 
@@ -181,8 +196,25 @@ impl TcpClient {
         {
             Ok(_) => {}
             Err(e) => {
+                let error_type = if e.to_string().contains("connection refused") {
+                    ErrorType::ConnectionFailed
+                } else if e.to_string().contains("timeout") {
+                    ErrorType::NetworkTimeout
+                } else if e.to_string().contains("broken pipe") || e.to_string().contains("reset") {
+                    ErrorType::UnexpectedDisconnection
+                } else if e.to_string().contains("too large") {
+                    ErrorType::MessageTooLarge
+                } else {
+                    ErrorType::IoError
+                };
+                
                 tracing::warn!("File download simulation failed: {}", e);
-                self.metrics.record_error(&connection_id);
+                self.metrics.record_error_with_detail(
+                    &connection_id,
+                    error_type,
+                    e.to_string(),
+                    Some(format!("File download - size: {} bytes", file_size))
+                );
             }
         }
 
@@ -263,8 +295,25 @@ impl TcpClient {
         {
             Ok(_) => {}
             Err(e) => {
+                let error_type = if e.to_string().contains("connection refused") {
+                    ErrorType::ConnectionFailed
+                } else if e.to_string().contains("timeout") {
+                    ErrorType::NetworkTimeout
+                } else if e.to_string().contains("broken pipe") || e.to_string().contains("reset") {
+                    ErrorType::UnexpectedDisconnection
+                } else if e.to_string().contains("too large") {
+                    ErrorType::MessageTooLarge
+                } else {
+                    ErrorType::IoError
+                };
+                
                 tracing::warn!("File upload simulation failed: {}", e);
-                self.metrics.record_error(&connection_id);
+                self.metrics.record_error_with_detail(
+                    &connection_id,
+                    error_type,
+                    e.to_string(),
+                    Some(format!("File upload - size: {} bytes", file_size))
+                );
             }
         }
 

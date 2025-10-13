@@ -1,7 +1,6 @@
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -19,6 +18,7 @@ pub struct ConnectionMetrics {
     pub errors: u64,
     pub latencies: Vec<Duration>,
     pub user_activity: Option<crate::UserActivity>,
+    pub error_details: Vec<crate::ErrorDetail>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +42,7 @@ pub struct ErrorSample {
     pub timestamp: chrono::DateTime<chrono::Utc>,
     pub tcp_errors: u64,
     pub udp_errors: u64,
+    pub error_details: Vec<crate::ErrorDetail>,
 }
 
 #[derive(Debug)]
@@ -50,6 +51,7 @@ pub struct MetricsCollector {
     pub throughput_history: Arc<RwLock<Vec<ThroughputSample>>>,
     pub latency_history: Arc<RwLock<Vec<LatencySample>>>,
     pub error_history: Arc<RwLock<Vec<ErrorSample>>>,
+    pub error_details: Arc<RwLock<Vec<crate::ErrorDetail>>>,
     pub start_time: Option<Instant>,
     last_sample_time: Arc<RwLock<Instant>>,
     last_tcp_bytes_sent: Arc<RwLock<u64>>,
@@ -74,6 +76,7 @@ impl MetricsCollector {
             throughput_history: Arc::new(RwLock::new(Vec::new())),
             latency_history: Arc::new(RwLock::new(Vec::new())),
             error_history: Arc::new(RwLock::new(Vec::new())),
+            error_details: Arc::new(RwLock::new(Vec::new())),
             start_time: Some(now),
             last_sample_time: Arc::new(RwLock::new(now)),
             last_tcp_bytes_sent: Arc::new(RwLock::new(0)),
@@ -98,6 +101,7 @@ impl MetricsCollector {
             errors: 0,
             latencies: Vec::new(),
             user_activity: None,
+            error_details: Vec::new(),
         };
         self.connections.insert(id, metrics);
     }
@@ -120,6 +124,7 @@ impl MetricsCollector {
             errors: 0,
             latencies: Vec::new(),
             user_activity: Some(activity),
+            error_details: Vec::new(),
         };
         self.connections.insert(id, metrics);
     }
@@ -157,6 +162,28 @@ impl MetricsCollector {
     pub fn record_error(&self, id: &Uuid) {
         if let Some(mut metrics) = self.connections.get_mut(id) {
             metrics.errors += 1;
+        }
+    }
+
+    pub fn record_error_with_detail(
+        &self, 
+        id: &Uuid, 
+        error_type: crate::ErrorType,
+        message: String,
+        context: Option<String>
+    ) {
+        if let Some(mut metrics) = self.connections.get_mut(id) {
+            metrics.errors += 1;
+            
+            let error_detail = crate::ErrorDetail::new(
+                error_type,
+                message,
+                *id,
+                context,
+            );
+            
+            metrics.error_details.push(error_detail.clone());
+            self.error_details.write().push(error_detail);
         }
     }
 
@@ -284,18 +311,21 @@ impl MetricsCollector {
 
         let mut tcp_errors = 0u64;
         let mut udp_errors = 0u64;
+        let mut current_errors = Vec::new();
 
         for metrics in self.connections.iter() {
             match metrics.connection_type {
                 crate::ConnectionType::Tcp => tcp_errors += metrics.errors,
                 crate::ConnectionType::Udp => udp_errors += metrics.errors,
             }
+            current_errors.extend(metrics.error_details.clone());
         }
 
         self.error_history.write().push(ErrorSample {
             timestamp,
             tcp_errors,
             udp_errors,
+            error_details: current_errors,
         });
     }
 
