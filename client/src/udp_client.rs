@@ -1,6 +1,6 @@
+use crate::server_pool::ServerPool;
 use shared::{Message, MessageType, UserActivity, ConnectionType, MetricsCollector, ErrorType};
 use rand::Rng;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
@@ -8,14 +8,14 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct UdpClient {
-    server_addr: SocketAddr,
+    server_pool: Arc<ServerPool>,
     metrics: Arc<MetricsCollector>,
 }
 
 impl UdpClient {
-    pub fn new(server_addr: SocketAddr, metrics: Arc<MetricsCollector>) -> Self {
+    pub fn new(server_pool: Arc<ServerPool>, metrics: Arc<MetricsCollector>) -> Self {
         Self {
-            server_addr,
+            server_pool,
             metrics,
         }
     }
@@ -45,8 +45,13 @@ impl UdpClient {
         let session_duration = Duration::from_secs(rand::thread_rng().gen_range(10..=100));
         let packet_interval = Duration::from_nanos(1_000_000_000 / packets_per_second as u64);
         
+        let server_addr = self.server_pool.get_server().await
+            .ok_or_else(|| anyhow::anyhow!("No healthy servers available for UDP connection"))?;
+        
         let socket = UdpSocket::bind("0.0.0.0:0").await?;
-        socket.connect(self.server_addr).await?;
+        socket.connect(server_addr).await?;
+        
+        self.server_pool.mark_connection_start(server_addr).await;
         
         let session_start = Instant::now();
         let mut packet_sequence = 0u64;
@@ -97,6 +102,7 @@ impl UdpClient {
             tokio::time::sleep(sleep_duration).await;
         }
         
+        self.server_pool.mark_connection_end(server_addr).await;
         self.metrics.end_connection(&connection_id);
         Ok(())
     }

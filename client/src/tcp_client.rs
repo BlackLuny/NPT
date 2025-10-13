@@ -1,3 +1,4 @@
+use crate::server_pool::ServerPool;
 use rand::Rng;
 use shared::{ConnectionType, ErrorType, Message, MessageType, MetricsCollector, UserActivity};
 use std::net::SocketAddr;
@@ -10,14 +11,14 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct TcpClient {
-    server_addr: SocketAddr,
+    server_pool: Arc<ServerPool>,
     metrics: Arc<MetricsCollector>,
 }
 
 impl TcpClient {
-    pub fn new(server_addr: SocketAddr, metrics: Arc<MetricsCollector>) -> Self {
+    pub fn new(server_pool: Arc<ServerPool>, metrics: Arc<MetricsCollector>) -> Self {
         Self {
-            server_addr,
+            server_pool,
             metrics,
         }
     }
@@ -120,7 +121,7 @@ impl TcpClient {
         requests_per_page: (u32, u32),
         stoped: Arc<AtomicBool>,
     ) -> anyhow::Result<()> {
-        let mut stream = TcpStream::connect(self.server_addr).await?;
+        let (mut stream, server_addr) = self.connect_with_failover().await?;
 
         let _ = stream.set_nodelay(true);
 
@@ -134,7 +135,7 @@ impl TcpClient {
         self.metrics
             .record_bytes_sent(&connection_id, handshake_size as u64);
 
-        let (response, length) = self.receive_response(&mut stream).await?;
+        let (_response, length) = self.receive_response(&mut stream).await?;
         let handshake_latency = request_start.elapsed();
         self.metrics
             .record_latency(&connection_id, handshake_latency);
@@ -156,13 +157,12 @@ impl TcpClient {
             self.metrics
                 .record_bytes_sent(&connection_id, request_size as u64);
 
-            let (response, length) = self.receive_response(&mut stream).await?;
+            let (_response, length) = self.receive_response(&mut stream).await?;
             let request_latency = request_start.elapsed();
             self.metrics.record_latency(&connection_id, request_latency);
             self.metrics.record_packet_received(&connection_id);
             self.metrics
                 .record_bytes_received(&connection_id, length as u64);
-            drop(response);
             if stoped.load(Ordering::Relaxed) {
                 break;
             }
@@ -170,6 +170,8 @@ impl TcpClient {
 
         let close_msg = Message::new(MessageType::ConnectionClose, vec![], session_id);
         self.send_message(&mut stream, &close_msg).await?;
+        
+        self.server_pool.mark_connection_end(server_addr).await;
 
         Ok(())
     }
@@ -233,7 +235,7 @@ impl TcpClient {
         _chunk_size: (u32, u32),
         stoped: Arc<AtomicBool>,
     ) -> anyhow::Result<()> {
-        let mut stream = TcpStream::connect(self.server_addr).await?;
+        let (mut stream, server_addr) = self.connect_with_failover().await?;
 
         let _ = stream.set_nodelay(true);
         let request_data = file_size.to_le_bytes().to_vec();
@@ -270,6 +272,8 @@ impl TcpClient {
 
         let close_msg = Message::new(MessageType::ConnectionClose, vec![], session_id);
         self.send_message(&mut stream, &close_msg).await?;
+        
+        self.server_pool.mark_connection_end(server_addr).await;
 
         Ok(())
     }
@@ -333,7 +337,7 @@ impl TcpClient {
         chunk_size: (u32, u32),
         stoped: Arc<AtomicBool>,
     ) -> anyhow::Result<()> {
-        let mut stream = TcpStream::connect(self.server_addr).await?;
+        let (mut stream, server_addr) = self.connect_with_failover().await?;
 
         let _ = stream.set_nodelay(true);
         let upload_request_data = file_size.to_le_bytes().to_vec();
@@ -349,7 +353,7 @@ impl TcpClient {
         self.metrics
             .record_bytes_sent(&connection_id, upload_request.payload.len() as u64);
 
-        let (ack_response, length) = self.receive_response(&mut stream).await?;
+        let (_ack_response, length) = self.receive_response(&mut stream).await?;
         let initial_latency = request_start.elapsed();
         self.metrics.record_latency(&connection_id, initial_latency);
         self.metrics.record_packet_received(&connection_id);
@@ -375,7 +379,7 @@ impl TcpClient {
             )
             .await?;
 
-            let (ack, length) = self.receive_response(&mut stream).await?;
+            let (_ack, length) = self.receive_response(&mut stream).await?;
             let chunk_latency = chunk_start.elapsed();
             self.metrics.record_latency(&connection_id, chunk_latency);
             self.metrics.record_packet_received(&connection_id);
@@ -392,6 +396,8 @@ impl TcpClient {
 
         let close_msg = Message::new(MessageType::ConnectionClose, vec![], session_id);
         self.send_message(&mut stream, &close_msg).await?;
+        
+        self.server_pool.mark_connection_end(server_addr).await;
 
         Ok(())
     }
@@ -430,6 +436,37 @@ impl TcpClient {
         stream.flush().await?;
 
         Ok(length as usize)
+    }
+
+    async fn connect_with_failover(&self) -> anyhow::Result<(TcpStream, SocketAddr)> {
+        let max_retries = 3;
+        let mut last_error = None;
+        
+        for attempt in 0..max_retries {
+            if let Some(server_addr) = self.server_pool.get_server().await {
+                match TcpStream::connect(server_addr).await {
+                    Ok(stream) => {
+                        self.server_pool.mark_connection_start(server_addr).await;
+                        self.server_pool.mark_connection_success(server_addr).await;
+                        return Ok((stream, server_addr));
+                    }
+                    Err(e) => {
+                        let error_msg = format!("Connection attempt {} failed: {}", attempt + 1, e);
+                        self.server_pool.mark_connection_failed(server_addr, &error_msg).await;
+                        last_error = Some(e);
+                        
+                        if attempt < max_retries - 1 {
+                            let backoff = Duration::from_millis(100 * (1 << attempt));
+                            tokio::time::sleep(backoff).await;
+                        }
+                    }
+                }
+            } else {
+                return Err(anyhow::anyhow!("No healthy servers available"));
+            }
+        }
+        
+        Err(anyhow::anyhow!("All connection attempts failed: {:?}", last_error))
     }
 
     async fn receive_response(&self, stream: &mut TcpStream) -> anyhow::Result<(Message, usize)> {

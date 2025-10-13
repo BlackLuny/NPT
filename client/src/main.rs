@@ -1,3 +1,4 @@
+mod server_pool;
 mod simulator;
 mod tcp_client;
 mod tui;
@@ -46,11 +47,11 @@ async fn main() -> anyhow::Result<()> {
         .version("0.1.0")
         .about("Network Proxy Testing Client")
         .arg(
-            Arg::new("server")
+            Arg::new("servers")
                 .short('s')
-                .long("server")
-                .value_name("ADDRESS")
-                .help("Server address to connect to")
+                .long("servers")
+                .value_name("ADDRESSES")
+                .help("Server addresses to connect to (comma-separated)")
                 .default_value("127.0.0.1:8080"),
         )
         .arg(
@@ -93,11 +94,18 @@ async fn main() -> anyhow::Result<()> {
         )
         .get_matches();
 
-    let server_addr: SocketAddr = matches
-        .get_one::<String>("server")
-        .unwrap()
-        .parse()
-        .map_err(|_| anyhow::anyhow!("Invalid server address"))?;
+    let servers_str = matches.get_one::<String>("servers").unwrap();
+    let server_addresses: Result<Vec<SocketAddr>, _> = servers_str
+        .split(',')
+        .map(|addr| addr.trim().parse())
+        .collect();
+    
+    let server_addresses = server_addresses
+        .map_err(|_| anyhow::anyhow!("Invalid server address format"))?;
+    
+    if server_addresses.is_empty() {
+        return Err(anyhow::anyhow!("At least one server address is required"));
+    }
 
     let concurrent_users: u32 = matches
         .get_one::<String>("users")
@@ -127,15 +135,15 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let mut config = TestConfig::default();
-    config.server_address = server_addr;
+    config.server_addresses = server_addresses.clone();
     config.concurrent_users = concurrent_users;
     config.duration = Duration::from_secs(duration_secs);
     config.reporting.output_format = output_format;
     config.reporting.output_path = output_path.clone();
 
     info!(
-        "Starting client with config: server={}, users={}, duration={:?}",
-        server_addr, concurrent_users, config.duration
+        "Starting client with config: servers={:?}, users={}, duration={:?}",
+        server_addresses, concurrent_users, config.duration
     );
 
     let metrics = Arc::new(MetricsCollector::new());

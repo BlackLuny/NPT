@@ -1,3 +1,4 @@
+use crate::server_pool::ServerPool;
 use rand::Rng;
 use shared::{MetricsCollector, TestConfig, UserActivity};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,12 +14,18 @@ pub struct UserSimulator {
     #[allow(dead_code)]
     metrics: Arc<MetricsCollector>,
     connection_semaphore: Arc<Semaphore>,
+    server_pool: Arc<ServerPool>,
 }
 
 impl UserSimulator {
     pub fn new(config: TestConfig, metrics: Arc<MetricsCollector>) -> Self {
-        let tcp_client = TcpClient::new(config.server_address, metrics.clone());
-        let udp_client = UdpClient::new(config.server_address, metrics.clone());
+        let server_pool = Arc::new(ServerPool::new(
+            config.server_addresses.clone(),
+            config.load_balancer.clone(),
+        ));
+        
+        let tcp_client = TcpClient::new(server_pool.clone(), metrics.clone());
+        let udp_client = UdpClient::new(server_pool.clone(), metrics.clone());
         let connection_semaphore = Arc::new(Semaphore::new(config.concurrent_users as usize));
 
         Self {
@@ -27,6 +34,7 @@ impl UserSimulator {
             udp_client,
             metrics,
             connection_semaphore,
+            server_pool,
         }
     }
 
@@ -45,9 +53,10 @@ impl UserSimulator {
             let udp_client = self.udp_client.clone();
             let config = self.config.clone();
             let semaphore = self.connection_semaphore.clone();
+            let server_pool = self.server_pool.clone();
 
             join_set.spawn(async move {
-                Self::simulate_user_behavior(user_id, tcp_client, udp_client, config, semaphore)
+                Self::simulate_user_behavior(user_id, tcp_client, udp_client, config, semaphore, server_pool)
                     .await
             });
         }
@@ -84,6 +93,7 @@ impl UserSimulator {
         udp_client: UdpClient,
         config: TestConfig,
         semaphore: Arc<Semaphore>,
+        _server_pool: Arc<ServerPool>,
     ) -> anyhow::Result<()> {
         let _permit = semaphore.acquire().await?;
 
@@ -205,9 +215,9 @@ pub struct TcpClient {
 }
 
 impl TcpClient {
-    pub fn new(server_addr: std::net::SocketAddr, metrics: Arc<MetricsCollector>) -> Self {
+    pub fn new(server_pool: Arc<ServerPool>, metrics: Arc<MetricsCollector>) -> Self {
         Self {
-            inner: crate::tcp_client::TcpClient::new(server_addr, metrics),
+            inner: crate::tcp_client::TcpClient::new(server_pool, metrics),
         }
     }
 
@@ -226,9 +236,9 @@ pub struct UdpClient {
 }
 
 impl UdpClient {
-    pub fn new(server_addr: std::net::SocketAddr, metrics: Arc<MetricsCollector>) -> Self {
+    pub fn new(server_pool: Arc<ServerPool>, metrics: Arc<MetricsCollector>) -> Self {
         Self {
-            inner: crate::udp_client::UdpClient::new(server_addr, metrics),
+            inner: crate::udp_client::UdpClient::new(server_pool, metrics),
         }
     }
 

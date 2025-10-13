@@ -6,10 +6,43 @@ use std::time::Duration;
 pub struct TestConfig {
     pub duration: Duration,
     pub concurrent_users: u32,
-    pub server_address: SocketAddr,
+    pub server_addresses: Vec<SocketAddr>,
+    pub load_balancer: LoadBalancerConfig,
     pub client_bind_address: Option<SocketAddr>,
     pub user_behavior: UserBehaviorConfig,
     pub reporting: ReportingConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadBalancerConfig {
+    pub strategy: LoadBalanceStrategy,
+    pub health_check: HealthCheckConfig,
+    pub connection_pool: ConnectionPoolConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LoadBalanceStrategy {
+    RoundRobin,
+    Random,
+    LeastConnections,
+    HashBased,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthCheckConfig {
+    pub enabled: bool,
+    pub timeout: Duration,
+    pub interval: Duration,
+    pub failure_threshold: u32,
+    pub recovery_threshold: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionPoolConfig {
+    pub max_connections_per_server: u32,
+    pub connection_timeout: Duration,
+    pub retry_attempts: u32,
+    pub retry_backoff_base: Duration,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,11 +100,61 @@ impl Default for TestConfig {
         Self {
             duration: Duration::from_secs(300),
             concurrent_users: 100,
-            server_address: "127.0.0.1:8080".parse().unwrap(),
+            server_addresses: vec!["127.0.0.1:8080".parse().unwrap()],
+            load_balancer: LoadBalancerConfig::default(),
             client_bind_address: None,
             user_behavior: UserBehaviorConfig::default(),
             reporting: ReportingConfig::default(),
         }
+    }
+}
+
+impl Default for LoadBalancerConfig {
+    fn default() -> Self {
+        Self {
+            strategy: LoadBalanceStrategy::RoundRobin,
+            health_check: HealthCheckConfig::default(),
+            connection_pool: ConnectionPoolConfig::default(),
+        }
+    }
+}
+
+impl Default for HealthCheckConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            timeout: Duration::from_secs(5),
+            interval: Duration::from_secs(30),
+            failure_threshold: 3,
+            recovery_threshold: 2,
+        }
+    }
+}
+
+impl Default for ConnectionPoolConfig {
+    fn default() -> Self {
+        Self {
+            max_connections_per_server: 1000,
+            connection_timeout: Duration::from_secs(10),
+            retry_attempts: 3,
+            retry_backoff_base: Duration::from_millis(100),
+        }
+    }
+}
+
+impl TestConfig {
+    pub fn with_single_server(mut self, server_address: SocketAddr) -> Self {
+        self.server_addresses = vec![server_address];
+        self
+    }
+    
+    pub fn with_servers(mut self, server_addresses: Vec<SocketAddr>) -> Self {
+        self.server_addresses = server_addresses;
+        self
+    }
+    
+    pub fn primary_server(&self) -> Option<SocketAddr> {
+        self.server_addresses.first().copied()
     }
 }
 
