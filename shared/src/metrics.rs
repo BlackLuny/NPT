@@ -166,23 +166,23 @@ impl MetricsCollector {
     }
 
     pub fn record_error_with_detail(
-        &self, 
-        id: &Uuid, 
+        &self,
+        id: &Uuid,
         error_type: crate::ErrorType,
         message: String,
-        context: Option<String>
+        context: Option<String>,
     ) {
-        if let Some(mut metrics) = self.connections.get_mut(id) {
+        let detail = if let Some(mut metrics) = self.connections.get_mut(id) {
             metrics.errors += 1;
-            
-            let error_detail = crate::ErrorDetail::new(
-                error_type,
-                message,
-                *id,
-                context,
-            );
-            
+
+            let error_detail = crate::ErrorDetail::new(error_type, message, *id, context);
+
             metrics.error_details.push(error_detail.clone());
+            Some(error_detail)
+        } else {
+            None
+        };
+        if let Some(error_detail) = detail {
             self.error_details.write().push(error_detail);
         }
     }
@@ -220,6 +220,7 @@ impl MetricsCollector {
         let mut last_tcp_bytes_received = self.last_tcp_bytes_received.write();
         let mut last_udp_bytes_sent = self.last_udp_bytes_sent.write();
         let mut last_udp_bytes_received = self.last_udp_bytes_received.write();
+        let mut throughput_history = self.throughput_history.write();
 
         let elapsed = now.duration_since(*last_sample_time).as_secs_f64();
 
@@ -239,7 +240,7 @@ impl MetricsCollector {
             let udp_upload_bps = (udp_upload_delta as f64 / elapsed) as u64;
             let udp_download_bps = (udp_download_delta as f64 / elapsed) as u64;
 
-            self.throughput_history.write().push(ThroughputSample {
+            throughput_history.push(ThroughputSample {
                 timestamp,
                 tcp_upload_bps,
                 tcp_download_bps,

@@ -267,7 +267,7 @@ impl ClientTui {
         f.render_widget(file_upload_gauge, chunks[2]);
 
         let latest_throughput = self.metrics.get_latest_throughput();
-        let current_mbps = if let Some(tp) = latest_throughput {
+        let current_mb = if let Some(tp) = latest_throughput {
             (tp.tcp_upload_bps + tp.tcp_download_bps + tp.udp_upload_bps + tp.udp_download_bps)
                 as f64
                 / 1_000_000.0
@@ -282,8 +282,8 @@ impl ClientTui {
                     .title("Current Throughput"),
             )
             .gauge_style(Style::default().fg(Color::Yellow))
-            .percent(std::cmp::min(current_mbps as u16, 100))
-            .label(format!("{:.2} Mbps", current_mbps));
+            .percent(std::cmp::min(current_mb as u16, 100))
+            .label(format!("{:.2} MB", current_mb));
 
         f.render_widget(throughput_gauge, chunks[3]);
 
@@ -331,7 +331,7 @@ impl ClientTui {
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title("Throughput (Mbps)"),
+                        .title("Throughput (MB)"),
                 )
                 .style(Style::default().fg(Color::Gray));
             f.render_widget(empty_chart, area);
@@ -388,7 +388,7 @@ impl ClientTui {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Throughput (Mbps)"),
+                    .title("Throughput (MB)"),
             )
             .x_axis(
                 Axis::default()
@@ -402,7 +402,7 @@ impl ClientTui {
             )
             .y_axis(
                 Axis::default()
-                    .title("Mbps")
+                    .title("MB")
                     .style(Style::default().fg(Color::Gray))
                     .bounds([0.0, max_throughput])
                     .labels(vec![

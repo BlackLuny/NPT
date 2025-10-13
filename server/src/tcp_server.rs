@@ -332,7 +332,11 @@ impl TcpServer {
 
     async fn receive_message(stream: &mut TcpStream) -> anyhow::Result<Message> {
         let mut length_buf = [0u8; 4];
-        stream.read_exact(&mut length_buf).await?;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            stream.read_exact(&mut length_buf),
+        )
+        .await??;
         let length = u32::from_le_bytes(length_buf) as usize;
 
         if length > 10 * 1024 * 1024 {
@@ -340,7 +344,11 @@ impl TcpServer {
         }
 
         let mut message_buf = vec![0u8; length];
-        stream.read_exact(&mut message_buf).await?;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            stream.read_exact(&mut message_buf),
+        )
+        .await??;
 
         let message: Message = serde_json::from_slice(&message_buf)?;
         Ok(message)

@@ -261,7 +261,7 @@ impl ServerTui {
         f.render_widget(udp_gauge, chunks[1]);
 
         let latest_throughput = self.metrics.get_latest_throughput();
-        let current_mbps = if let Some(tp) = latest_throughput {
+        let current_mb = if let Some(tp) = latest_throughput {
             (tp.tcp_upload_bps + tp.tcp_download_bps + tp.udp_upload_bps + tp.udp_download_bps) as f64 / 1_000_000.0
         } else {
             0.0
@@ -270,8 +270,8 @@ impl ServerTui {
         let throughput_gauge = Gauge::default()
             .block(Block::default().borders(Borders::ALL).title("Throughput"))
             .gauge_style(Style::default().fg(Color::Yellow))
-            .percent(std::cmp::min(current_mbps as u16, 100))
-            .label(format!("{:.2} Mbps", current_mbps));
+            .percent(std::cmp::min(current_mb as u16, 100))
+            .label(format!("{:.2} MB", current_mb));
 
         f.render_widget(throughput_gauge, chunks[2]);
 
@@ -383,7 +383,7 @@ impl ServerTui {
         }
 
         let sparkline = Sparkline::default()
-            .block(Block::default().borders(Borders::ALL).title("Throughput History (x0.1 Mbps)"))
+            .block(Block::default().borders(Borders::ALL).title("Throughput History (x0.1 MB)"))
             .data(&throughput_data)
             .style(Style::default().fg(Color::Yellow));
 

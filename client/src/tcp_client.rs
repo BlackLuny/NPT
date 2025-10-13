@@ -1,5 +1,5 @@
 use rand::Rng;
-use shared::{ConnectionType, Message, MessageType, MetricsCollector, UserActivity, ErrorType};
+use shared::{ConnectionType, ErrorType, Message, MessageType, MetricsCollector, UserActivity};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -82,22 +82,24 @@ impl TcpClient {
             {
                 Ok(_) => {}
                 Err(e) => {
-                    let error_type = if e.to_string().contains("connection refused") {
+                    let error_string = e.to_string().to_lowercase();
+                    let error_type = if error_string.contains("connection refused") {
                         ErrorType::ConnectionFailed
-                    } else if e.to_string().contains("timeout") {
+                    } else if error_string.contains("timeout") {
                         ErrorType::NetworkTimeout
-                    } else if e.to_string().contains("broken pipe") || e.to_string().contains("reset") {
+                    } else if error_string.contains("broken pipe") || error_string.contains("reset")
+                    {
                         ErrorType::UnexpectedDisconnection
                     } else {
                         ErrorType::Other
                     };
-                    
+
                     tracing::warn!("Web browsing simulation failed: {}", e);
                     self.metrics.record_error_with_detail(
                         &connection_id,
                         error_type,
                         e.to_string(),
-                        Some(format!("Web browsing - page {}", _page + 1))
+                        Some(format!("Web browsing - page {}", _page + 1)),
                     );
                 }
             }
@@ -127,39 +129,39 @@ impl TcpClient {
         let handshake_msg = Message::new(MessageType::TlsHandshake, handshake_data, session_id);
 
         let request_start = Instant::now();
-        self.send_message(&mut stream, &handshake_msg).await?;
+        let handshake_size = self.send_message(&mut stream, &handshake_msg).await?;
         self.metrics.record_packet_sent(&connection_id);
         self.metrics
             .record_bytes_sent(&connection_id, handshake_size as u64);
 
-        let response = self.receive_response(&mut stream).await?;
+        let (response, length) = self.receive_response(&mut stream).await?;
         let handshake_latency = request_start.elapsed();
         self.metrics
             .record_latency(&connection_id, handshake_latency);
         self.metrics.record_packet_received(&connection_id);
         self.metrics
-            .record_bytes_received(&connection_id, response.payload.len() as u64);
+            .record_bytes_received(&connection_id, length as u64);
 
         let num_requests = rand::thread_rng().gen_range(requests_per_page.0..=requests_per_page.1);
 
         for request_num in 0..num_requests {
-            let request_size = rand::thread_rng().gen_range(1024..= 4*1024);
+            let request_size = rand::thread_rng().gen_range(1024..=4 * 1024);
             let request_data = vec![0u8; request_size];
             let http_request = Message::new(MessageType::HttpRequest, request_data, session_id)
                 .with_sequence(request_num as u64);
 
             let request_start = Instant::now();
-            self.send_message(&mut stream, &http_request).await?;
+            let request_size = self.send_message(&mut stream, &http_request).await?;
             self.metrics.record_packet_sent(&connection_id);
             self.metrics
                 .record_bytes_sent(&connection_id, request_size as u64);
 
-            let response = self.receive_response(&mut stream).await?;
+            let (response, length) = self.receive_response(&mut stream).await?;
             let request_latency = request_start.elapsed();
             self.metrics.record_latency(&connection_id, request_latency);
             self.metrics.record_packet_received(&connection_id);
             self.metrics
-                .record_bytes_received(&connection_id, response.payload.len() as u64);
+                .record_bytes_received(&connection_id, length as u64);
             drop(response);
             if stoped.load(Ordering::Relaxed) {
                 break;
@@ -196,24 +198,25 @@ impl TcpClient {
         {
             Ok(_) => {}
             Err(e) => {
-                let error_type = if e.to_string().contains("connection refused") {
+                let error_string = e.to_string().to_lowercase();
+                let error_type = if error_string.contains("connection refused") {
                     ErrorType::ConnectionFailed
-                } else if e.to_string().contains("timeout") {
+                } else if error_string.contains("timeout") {
                     ErrorType::NetworkTimeout
-                } else if e.to_string().contains("broken pipe") || e.to_string().contains("reset") {
+                } else if error_string.contains("broken pipe") || error_string.contains("reset") {
                     ErrorType::UnexpectedDisconnection
-                } else if e.to_string().contains("too large") {
+                } else if error_string.contains("too large") {
                     ErrorType::MessageTooLarge
                 } else {
                     ErrorType::IoError
                 };
-                
+
                 tracing::warn!("File download simulation failed: {}", e);
                 self.metrics.record_error_with_detail(
                     &connection_id,
                     error_type,
                     e.to_string(),
-                    Some(format!("File download - size: {} bytes", file_size))
+                    Some(format!("File download - size: {} bytes", file_size)),
                 );
             }
         }
@@ -238,22 +241,22 @@ impl TcpClient {
             Message::new(MessageType::FileDownloadRequest, request_data, session_id);
 
         let request_start = Instant::now();
-        self.send_message(&mut stream, &download_request).await?;
+        let send_size = self.send_message(&mut stream, &download_request).await?;
         self.metrics.record_packet_sent(&connection_id);
         self.metrics
-            .record_bytes_sent(&connection_id, download_request.payload.len() as u64);
+            .record_bytes_sent(&connection_id, send_size as u64);
 
         let mut bytes_received = 0u64;
         let mut chunk_count = 0u64;
 
         while bytes_received < file_size {
-            let chunk = self.receive_response(&mut stream).await?;
+            let (chunk, length) = self.receive_response(&mut stream).await?;
             bytes_received += chunk.payload.len() as u64;
             chunk_count += 1;
 
             self.metrics.record_packet_received(&connection_id);
             self.metrics
-                .record_bytes_received(&connection_id, chunk.payload.len() as u64);
+                .record_bytes_received(&connection_id, length as u64);
 
             if chunk_count == 1 {
                 let initial_latency = request_start.elapsed();
@@ -295,24 +298,25 @@ impl TcpClient {
         {
             Ok(_) => {}
             Err(e) => {
-                let error_type = if e.to_string().contains("connection refused") {
+                let error_string = e.to_string().to_lowercase();
+                let error_type = if error_string.contains("connection refused") {
                     ErrorType::ConnectionFailed
-                } else if e.to_string().contains("timeout") {
+                } else if error_string.contains("timeout") {
                     ErrorType::NetworkTimeout
-                } else if e.to_string().contains("broken pipe") || e.to_string().contains("reset") {
+                } else if error_string.contains("broken pipe") || error_string.contains("reset") {
                     ErrorType::UnexpectedDisconnection
-                } else if e.to_string().contains("too large") {
+                } else if error_string.contains("too large") {
                     ErrorType::MessageTooLarge
                 } else {
                     ErrorType::IoError
                 };
-                
+
                 tracing::warn!("File upload simulation failed: {}", e);
                 self.metrics.record_error_with_detail(
                     &connection_id,
                     error_type,
                     e.to_string(),
-                    Some(format!("File upload - size: {} bytes", file_size))
+                    Some(format!("File upload - size: {} bytes", file_size)),
                 );
             }
         }
@@ -345,12 +349,12 @@ impl TcpClient {
         self.metrics
             .record_bytes_sent(&connection_id, upload_request.payload.len() as u64);
 
-        let ack_response = self.receive_response(&mut stream).await?;
+        let (ack_response, length) = self.receive_response(&mut stream).await?;
         let initial_latency = request_start.elapsed();
         self.metrics.record_latency(&connection_id, initial_latency);
         self.metrics.record_packet_received(&connection_id);
         self.metrics
-            .record_bytes_received(&connection_id, ack_response.payload.len() as u64);
+            .record_bytes_received(&connection_id, length as u64);
 
         let mut bytes_sent = 0u64;
         let mut sequence = 0u64;
@@ -371,12 +375,12 @@ impl TcpClient {
             )
             .await?;
 
-            let ack = self.receive_response(&mut stream).await?;
+            let (ack, length) = self.receive_response(&mut stream).await?;
             let chunk_latency = chunk_start.elapsed();
             self.metrics.record_latency(&connection_id, chunk_latency);
             self.metrics.record_packet_received(&connection_id);
             self.metrics
-                .record_bytes_received(&connection_id, ack.payload.len() as u64);
+                .record_bytes_received(&connection_id, length as u64);
 
             bytes_sent += current_chunk_size as u64;
             sequence += 1;
@@ -405,15 +409,19 @@ impl TcpClient {
         let chunk_msg = Message::new(MessageType::FileUploadChunk, chunk_data, session_id)
             .with_sequence(sequence);
 
-        self.send_message(stream, &chunk_msg).await?;
+        let send_size = self.send_message(stream, &chunk_msg).await?;
         self.metrics.record_packet_sent(connection_id);
         self.metrics
-            .record_bytes_sent(connection_id, total_size as u64);
+            .record_bytes_sent(connection_id, send_size as u64);
 
         Ok(())
     }
 
-    async fn send_message(&self, stream: &mut TcpStream, message: &Message) -> anyhow::Result<()> {
+    async fn send_message(
+        &self,
+        stream: &mut TcpStream,
+        message: &Message,
+    ) -> anyhow::Result<usize> {
         let serialized = serde_json::to_vec(message)?;
         let length = serialized.len() as u32;
 
@@ -421,12 +429,16 @@ impl TcpClient {
         stream.write_all(&serialized).await?;
         stream.flush().await?;
 
-        Ok(())
+        Ok(length as usize)
     }
 
-    async fn receive_response(&self, stream: &mut TcpStream) -> anyhow::Result<Message> {
+    async fn receive_response(&self, stream: &mut TcpStream) -> anyhow::Result<(Message, usize)> {
         let mut length_buf = [0u8; 4];
-        stream.read_exact(&mut length_buf).await?;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            stream.read_exact(&mut length_buf),
+        )
+        .await??;
         let length = u32::from_le_bytes(length_buf) as usize;
 
         if length > 10 * 1024 * 1024 {
@@ -434,9 +446,13 @@ impl TcpClient {
         }
 
         let mut message_buf = vec![0u8; length];
-        stream.read_exact(&mut message_buf).await?;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            stream.read_exact(&mut message_buf),
+        )
+        .await??;
 
         let message: Message = serde_json::from_slice(&message_buf)?;
-        Ok(message)
+        Ok((message, length))
     }
 }
