@@ -44,7 +44,7 @@ impl ClientTui {
         }
     }
 
-    pub async fn run(&mut self) -> anyhow::Result<()> {
+    pub fn run(&mut self) -> anyhow::Result<()> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
 

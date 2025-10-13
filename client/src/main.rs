@@ -197,6 +197,7 @@ async fn main() -> anyhow::Result<()> {
 
         let mut tui = ClientTui::new(metrics.clone(), log_buffer.clone());
 
+        let tui_result = tokio::task::spawn_blocking(move || tui.run());
         tokio::select! {
             result = simulation_task => {
                 match result {
@@ -205,12 +206,13 @@ async fn main() -> anyhow::Result<()> {
                     Err(e) => warn!("Simulation task panicked: {}", e),
                 }
             }
-            tui_result = tui.run() => {
+            tui_result = tui_result => {
                 match tui_result {
                     Ok(_) => info!("TUI exited normally"),
                     Err(e) => warn!("TUI error: {}", e),
                 }
             }
+
             _ = shutdown_rx.recv() => {
                 info!("Received shutdown signal, stopping...");
             }

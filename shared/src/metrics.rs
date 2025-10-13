@@ -294,12 +294,6 @@ impl MetricsCollector {
             udp_latencies.iter().sum::<f64>() / udp_latencies.len() as f64
         };
 
-        tracing::info!(
-            "TCP avg latency: {}ms, UDP avg latency: {}ms",
-            tcp_avg,
-            udp_avg
-        );
-
         self.latency_history.write().push(LatencySample {
             timestamp,
             tcp_latency_ms: tcp_avg,
