@@ -107,7 +107,7 @@ impl TcpClient {
 
             self.metrics.end_connection(&connection_id);
 
-            let think_time = Duration::from_millis(rand::thread_rng().gen_range(100..500));
+            let think_time = Duration::from_millis(rand::thread_rng().gen_range(300..1000));
             tokio::time::sleep(think_time).await;
         }
 
@@ -163,6 +163,9 @@ impl TcpClient {
             self.metrics.record_packet_received(&connection_id);
             self.metrics
                 .record_bytes_received(&connection_id, length as u64);
+            let sleep_time =
+                rand::thread_rng().gen_range(Duration::from_millis(10)..Duration::from_millis(50));
+            tokio::time::sleep(sleep_time).await;
             if stoped.load(Ordering::Relaxed) {
                 break;
             }
@@ -170,7 +173,7 @@ impl TcpClient {
 
         let close_msg = Message::new(MessageType::ConnectionClose, vec![], session_id);
         self.send_message(&mut stream, &close_msg).await?;
-        
+
         self.server_pool.mark_connection_end(server_addr).await;
 
         Ok(())
@@ -272,7 +275,7 @@ impl TcpClient {
 
         let close_msg = Message::new(MessageType::ConnectionClose, vec![], session_id);
         self.send_message(&mut stream, &close_msg).await?;
-        
+
         self.server_pool.mark_connection_end(server_addr).await;
 
         Ok(())
@@ -396,7 +399,7 @@ impl TcpClient {
 
         let close_msg = Message::new(MessageType::ConnectionClose, vec![], session_id);
         self.send_message(&mut stream, &close_msg).await?;
-        
+
         self.server_pool.mark_connection_end(server_addr).await;
 
         Ok(())
@@ -441,7 +444,7 @@ impl TcpClient {
     async fn connect_with_failover(&self) -> anyhow::Result<(TcpStream, SocketAddr)> {
         let max_retries = 3;
         let mut last_error = None;
-        
+
         for attempt in 0..max_retries {
             if let Some(server_addr) = self.server_pool.get_server().await {
                 match TcpStream::connect(server_addr).await {
@@ -452,9 +455,11 @@ impl TcpClient {
                     }
                     Err(e) => {
                         let error_msg = format!("Connection attempt {} failed: {}", attempt + 1, e);
-                        self.server_pool.mark_connection_failed(server_addr, &error_msg).await;
+                        self.server_pool
+                            .mark_connection_failed(server_addr, &error_msg)
+                            .await;
                         last_error = Some(e);
-                        
+
                         if attempt < max_retries - 1 {
                             let backoff = Duration::from_millis(100 * (1 << attempt));
                             tokio::time::sleep(backoff).await;
@@ -465,8 +470,11 @@ impl TcpClient {
                 return Err(anyhow::anyhow!("No healthy servers available"));
             }
         }
-        
-        Err(anyhow::anyhow!("All connection attempts failed: {:?}", last_error))
+
+        Err(anyhow::anyhow!(
+            "All connection attempts failed: {:?}",
+            last_error
+        ))
     }
 
     async fn receive_response(&self, stream: &mut TcpStream) -> anyhow::Result<(Message, usize)> {
