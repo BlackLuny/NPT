@@ -2,11 +2,15 @@ use chrono::{DateTime, Local};
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::path::PathBuf;
+use std::fs::OpenOptions;
+use std::io::Write;
 use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::{
     fmt::{format::Writer, FormatEvent, FormatFields},
     registry::LookupSpan,
 };
+use tokio::sync::mpsc;
 
 #[derive(Debug, Clone)]
 pub struct LogEntry {
@@ -42,6 +46,7 @@ impl LogEntry {
 pub struct LogBuffer {
     entries: Arc<Mutex<VecDeque<LogEntry>>>,
     max_size: usize,
+    file_sender: Option<mpsc::UnboundedSender<LogEntry>>,
 }
 
 impl LogBuffer {
@@ -49,10 +54,65 @@ impl LogBuffer {
         Self {
             entries: Arc::new(Mutex::new(VecDeque::with_capacity(max_size))),
             max_size,
+            file_sender: None,
         }
     }
 
+    pub fn new_with_file(max_size: usize, log_file_path: PathBuf) -> anyhow::Result<Self> {
+        let (tx, mut rx) = mpsc::unbounded_channel::<LogEntry>();
+        
+        // Ensure log directory exists
+        if let Some(parent) = log_file_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        
+        // Spawn file writer task
+        let file_path = log_file_path.clone();
+        tokio::spawn(async move {
+            let mut file = match OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&file_path) {
+                Ok(file) => file,
+                Err(e) => {
+                    eprintln!("Failed to open log file {:?}: {}", file_path, e);
+                    return;
+                }
+            };
+
+            while let Some(entry) = rx.recv().await {
+                let log_line = format!(
+                    "[{}] [{}] [{}] {}\n",
+                    entry.timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    entry.level,
+                    entry.target,
+                    entry.message
+                );
+                
+                if let Err(e) = file.write_all(log_line.as_bytes()) {
+                    eprintln!("Failed to write to log file: {}", e);
+                }
+                
+                if let Err(e) = file.flush() {
+                    eprintln!("Failed to flush log file: {}", e);
+                }
+            }
+        });
+        
+        Ok(Self {
+            entries: Arc::new(Mutex::new(VecDeque::with_capacity(max_size))),
+            max_size,
+            file_sender: Some(tx),
+        })
+    }
+
     pub fn add_entry(&self, entry: LogEntry) {
+        // Send to file if file logging is enabled
+        if let Some(sender) = &self.file_sender {
+            let _ = sender.send(entry.clone());
+        }
+        
+        // Add to memory buffer
         let mut entries = self.entries.lock();
         if entries.len() >= self.max_size {
             entries.pop_front();
@@ -93,6 +153,7 @@ impl Clone for LogBuffer {
         Self {
             entries: Arc::clone(&self.entries),
             max_size: self.max_size,
+            file_sender: self.file_sender.clone(),
         }
     }
 }

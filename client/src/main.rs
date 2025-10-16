@@ -9,6 +9,7 @@ use rustls::crypto::CryptoProvider;
 use shared::{LogBuffer, MetricsCollector, OutputFormat, TestConfig, TestReport, TuiLogFormatter};
 use simulator::UserSimulator;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
@@ -19,31 +20,6 @@ use tui::ClientTui;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-    // Create log buffer for TUI
-    let log_buffer = LogBuffer::new(1000);
-
-    // Initialize logging
-    if std::env::args().any(|arg| arg == "--no-tui") {
-        // For headless mode, use standard logging
-        tracing_subscriber::fmt::init();
-    } else {
-        // For TUI mode, use custom formatter
-        use tracing_subscriber::prelude::*;
-        use tracing_subscriber::{fmt, Registry};
-
-        let tui_formatter = TuiLogFormatter::new_with_suppression(log_buffer.clone(), true);
-
-        // Completely suppress ALL output in TUI mode - redirect stderr to sink as well
-        let subscriber = Registry::default()
-            .with(
-                fmt::layer()
-                    .event_format(tui_formatter)
-                    .with_writer(std::io::sink),
-            ) // Suppress normal output
-            .with(fmt::layer().with_writer(std::io::sink)); // Double layer to catch any leaks
-
-        tracing::subscriber::set_global_default(subscriber)?;
-    }
 
     let matches = Command::new("npt-client")
         .version("0.1.0")
@@ -94,6 +70,12 @@ async fn main() -> anyhow::Result<()> {
                 .help("Output format: json, csv, html")
                 .default_value("json"),
         )
+        .arg(
+            Arg::new("log-file")
+                .long("log-file")
+                .value_name("PATH")
+                .help("Path to log file (enables file logging)"),
+        )
         .get_matches();
 
     let servers_str = matches.get_one::<String>("servers").unwrap();
@@ -124,6 +106,37 @@ async fn main() -> anyhow::Result<()> {
     let no_tui = matches.get_flag("no-tui");
     let output_path = matches.get_one::<String>("output").unwrap();
     let format_str = matches.get_one::<String>("format").unwrap();
+    let log_file_path = matches.get_one::<String>("log-file");
+
+    // Create log buffer for TUI and optionally file logging
+    let log_buffer = if let Some(log_path) = log_file_path {
+        LogBuffer::new_with_file(1000, PathBuf::from(log_path))?
+    } else {
+        LogBuffer::new(1000)
+    };
+
+    // Initialize logging
+    if no_tui {
+        // For headless mode, use standard logging
+        tracing_subscriber::fmt::init();
+    } else {
+        // For TUI mode, use custom formatter
+        use tracing_subscriber::prelude::*;
+        use tracing_subscriber::{fmt, Registry};
+
+        let tui_formatter = TuiLogFormatter::new_with_suppression(log_buffer.clone(), true);
+
+        // Completely suppress ALL output in TUI mode - redirect stderr to sink as well
+        let subscriber = Registry::default()
+            .with(
+                fmt::layer()
+                    .event_format(tui_formatter)
+                    .with_writer(std::io::sink),
+            ) // Suppress normal output
+            .with(fmt::layer().with_writer(std::io::sink)); // Double layer to catch any leaks
+
+        tracing::subscriber::set_global_default(subscriber)?;
+    }
 
     let output_format = match format_str.as_str() {
         "json" => OutputFormat::Json,

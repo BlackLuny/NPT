@@ -1,4 +1,5 @@
 use crate::server_pool::ServerPool;
+use futures::StreamExt;
 use quinn::{crypto::rustls::QuicClientConfig, ClientConfig, Endpoint, VarInt};
 use rand::Rng;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -134,8 +135,43 @@ impl QuicClient {
             )?,
         )));
 
+        tracing::info!("QUIC Connecting to server: {}", server_addr);
+
         // Connect to server
-        let connection = endpoint.connect(server_addr, "localhost")?.await?;
+        let connection = match tokio::time::timeout(
+            Duration::from_secs(10),
+            endpoint.connect(server_addr, "localhost")?,
+        )
+        .await
+        {
+            Ok(Ok(connection)) => connection,
+            Ok(Err(e)) => {
+                tracing::warn!("Failed to connect to quic server: {}", e);
+                self.metrics.record_error_with_detail(
+                    &connection_id,
+                    ErrorType::IoError,
+                    e.to_string(),
+                    Some(format!(
+                        "QuicWebBrowsing - QUIC connect to server: {}",
+                        server_addr
+                    )),
+                );
+                return Err(anyhow::anyhow!("Failed to connect to quic server: {}", e));
+            }
+            Err(_) => {
+                tracing::warn!("Connection timed out");
+                self.metrics.record_error_with_detail(
+                    &connection_id,
+                    ErrorType::IoError,
+                    "QUIC Connection timed out".to_string(),
+                    Some(format!(
+                        "QuicWebBrowsing - connect to server: {} timeout",
+                        server_addr
+                    )),
+                );
+                return Err(anyhow::anyhow!("Connection timed out"));
+            }
+        };
 
         tracing::info!("QUIC connected to: {}", connection.remote_address());
 
@@ -175,7 +211,7 @@ impl QuicClient {
             }
 
             // Random think time between pages
-            let think_time = Duration::from_millis(rand::thread_rng().gen_range(100..=2000));
+            let think_time = Duration::from_millis(rand::thread_rng().gen_range(50..=500));
             tokio::time::sleep(think_time).await;
         }
 
@@ -203,7 +239,7 @@ impl QuicClient {
         session_id: Uuid,
         page_num: u32,
         num_resources: u32,
-        _concurrent_requests: u32,
+        concurrent_requests: u32,
     ) -> anyhow::Result<u32> {
         let mut successful_requests = 0;
 
@@ -230,33 +266,41 @@ impl QuicClient {
             }
         }
 
-        // Request additional resources (CSS, JS, images, etc.)
-        for resource_num in 0..num_resources {
-            let resource_path = match resource_num % 4 {
-                0 => format!("/css/style_{}.css", resource_num),
-                1 => format!("/js/script_{}.js", resource_num),
-                2 => format!("/images/image_{}.png", resource_num),
-                _ => format!("/data/data_{}.json", resource_num),
-            };
+        let resource_futures = futures::stream::iter(0..num_resources)
+            .map(|_resource_num| async {
+                let resource_num = rand::thread_rng().gen_range(0..4);
+                let resource_path = match resource_num % 4 {
+                    0 => format!("/css/style_{}.css", resource_num),
+                    1 => format!("/js/script_{}.js", resource_num),
+                    2 => format!("/images/image_{}.png", resource_num),
+                    _ => format!("/data/data_{}.json", resource_num),
+                };
 
-            match tokio::time::timeout(
-                Duration::from_secs(10),
-                self.request_resource(connection, connection_id, session_id, &resource_path),
-            )
-            .await
-            {
-                Ok(Ok(_)) => successful_requests += 1,
-                Ok(Err(e)) => {
-                    tracing::warn!("Failed to request resource {}: {}", resource_path, e);
-                    return Err(e);
+                match tokio::time::timeout(
+                    Duration::from_secs(5),
+                    self.request_resource(connection, connection_id, session_id, &resource_path),
+                )
+                .await
+                {
+                    Ok(Ok(_)) => Ok(()),
+                    Ok(Err(e)) => {
+                        tracing::warn!("Failed to request resource {}: {}", resource_path, e);
+                        return Err(e);
+                    }
+                    Err(_) => {
+                        tracing::warn!("Request timed out for resource {}", resource_path);
+                        return Err(anyhow::anyhow!("Request timed out"));
+                    }
                 }
-                Err(_) => {
-                    tracing::warn!("Request timed out for resource {}", resource_path);
-                    return Err(anyhow::anyhow!("Request timed out"));
-                }
-            }
+            })
+            .buffer_unordered(concurrent_requests as usize)
+            .collect::<Vec<_>>();
+
+        let results = tokio::time::timeout(Duration::from_secs(10), resource_futures).await?;
+        let all_successful = results.iter().all(|result| result.is_ok());
+        if all_successful {
+            successful_requests += num_resources;
         }
-
         Ok(successful_requests)
     }
 
