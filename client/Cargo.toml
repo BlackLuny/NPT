@@ -24,3 +24,7 @@ parking_lot = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 libc = "0.2"
+quinn = { workspace = true }
+rustls = { workspace = true }
+bytes = { workspace = true }
+http = { workspace = true }

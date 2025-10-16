@@ -13,6 +13,10 @@ pub enum MessageType {
     FileUploadChunk,
     GamePacket,
     ConnectionClose,
+    HttpGetRequest,
+    HttpGetResponse,
+    ResourceRequest,
+    ResourceResponse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +51,7 @@ impl Message {
 pub enum ConnectionType {
     Tcp,
     Udp,
+    Quic,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,9 +68,10 @@ pub enum UserActivity {
         file_size: u64,
         chunk_size: (u32, u32),
     },
-    Gaming {
-        packets_per_second: u32,
-        packet_size_range: (u32, u32),
+    QuicWebBrowsing {
+        pages_to_visit: u32,
+        resources_per_page: (u32, u32),
+        concurrent_requests: u32,
     },
 }
 

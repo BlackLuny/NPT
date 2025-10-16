@@ -28,6 +28,8 @@ pub struct ThroughputSample {
     pub tcp_download_bps: u64,
     pub udp_upload_bps: u64,
     pub udp_download_bps: u64,
+    pub quic_upload_bps: u64,
+    pub quic_download_bps: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +44,7 @@ pub struct ErrorSample {
     pub timestamp: chrono::DateTime<chrono::Utc>,
     pub tcp_errors: u64,
     pub udp_errors: u64,
+    pub quic_errors: u64,
     pub error_details: Vec<crate::ErrorDetail>,
 }
 
@@ -58,6 +61,8 @@ pub struct MetricsCollector {
     last_tcp_bytes_received: Arc<RwLock<u64>>,
     last_udp_bytes_sent: Arc<RwLock<u64>>,
     last_udp_bytes_received: Arc<RwLock<u64>>,
+    last_quic_bytes_sent: Arc<RwLock<u64>>,
+    last_quic_bytes_received: Arc<RwLock<u64>>,
     active_users: Arc<RwLock<u32>>,
     total_users: Arc<RwLock<u32>>,
 }
@@ -83,6 +88,8 @@ impl MetricsCollector {
             last_tcp_bytes_received: Arc::new(RwLock::new(0)),
             last_udp_bytes_sent: Arc::new(RwLock::new(0)),
             last_udp_bytes_received: Arc::new(RwLock::new(0)),
+            last_quic_bytes_sent: Arc::new(RwLock::new(0)),
+            last_quic_bytes_received: Arc::new(RwLock::new(0)),
             active_users: Arc::new(RwLock::new(0)),
             total_users: Arc::new(RwLock::new(0)),
         }
@@ -201,6 +208,8 @@ impl MetricsCollector {
         let mut tcp_download = 0u64;
         let mut udp_upload = 0u64;
         let mut udp_download = 0u64;
+        let mut quic_upload = 0u64;
+        let mut quic_download = 0u64;
 
         for metrics in self.connections.iter() {
             match metrics.connection_type {
@@ -212,6 +221,10 @@ impl MetricsCollector {
                     udp_upload += metrics.bytes_sent;
                     udp_download += metrics.bytes_received;
                 }
+                crate::ConnectionType::Quic => {
+                    quic_upload += metrics.bytes_sent;
+                    quic_download += metrics.bytes_received;
+                }
             }
         }
 
@@ -220,6 +233,8 @@ impl MetricsCollector {
         let mut last_tcp_bytes_received = self.last_tcp_bytes_received.write();
         let mut last_udp_bytes_sent = self.last_udp_bytes_sent.write();
         let mut last_udp_bytes_received = self.last_udp_bytes_received.write();
+        let mut last_quic_bytes_sent = self.last_quic_bytes_sent.write();
+        let mut last_quic_bytes_received = self.last_quic_bytes_received.write();
         let mut throughput_history = self.throughput_history.write();
 
         let elapsed = now.duration_since(*last_sample_time).as_secs_f64();
@@ -234,11 +249,17 @@ impl MetricsCollector {
             let udp_upload_delta = udp_upload.saturating_sub(*last_udp_bytes_sent);
             let udp_download_delta = udp_download.saturating_sub(*last_udp_bytes_received);
 
+            // Calculate QUIC deltas
+            let quic_upload_delta = quic_upload.saturating_sub(*last_quic_bytes_sent);
+            let quic_download_delta = quic_download.saturating_sub(*last_quic_bytes_received);
+
             // Calculate bytes per second for each protocol
             let tcp_upload_bps = (tcp_upload_delta as f64 / elapsed) as u64;
             let tcp_download_bps = (tcp_download_delta as f64 / elapsed) as u64;
             let udp_upload_bps = (udp_upload_delta as f64 / elapsed) as u64;
             let udp_download_bps = (udp_download_delta as f64 / elapsed) as u64;
+            let quic_upload_bps = (quic_upload_delta as f64 / elapsed) as u64;
+            let quic_download_bps = (quic_download_delta as f64 / elapsed) as u64;
 
             throughput_history.push(ThroughputSample {
                 timestamp,
@@ -246,6 +267,8 @@ impl MetricsCollector {
                 tcp_download_bps,
                 udp_upload_bps,
                 udp_download_bps,
+                quic_upload_bps,
+                quic_download_bps,
             });
 
             // Update last values for next calculation
@@ -253,6 +276,8 @@ impl MetricsCollector {
             *last_tcp_bytes_received = tcp_download;
             *last_udp_bytes_sent = udp_upload;
             *last_udp_bytes_received = udp_download;
+            *last_quic_bytes_sent = quic_upload;
+            *last_quic_bytes_received = quic_download;
             *last_sample_time = now;
         }
     }
@@ -262,6 +287,7 @@ impl MetricsCollector {
 
         let mut tcp_latencies = Vec::new();
         let mut udp_latencies = Vec::new();
+        let mut quic_latencies = Vec::new();
 
         for metrics in self.connections.iter() {
             match metrics.connection_type {
@@ -277,6 +303,13 @@ impl MetricsCollector {
                         let avg = metrics.latencies.iter().sum::<Duration>().as_millis() as f64
                             / metrics.latencies.len() as f64;
                         udp_latencies.push(avg);
+                    }
+                }
+                crate::ConnectionType::Quic => {
+                    if !metrics.latencies.is_empty() {
+                        let avg = metrics.latencies.iter().sum::<Duration>().as_millis() as f64
+                            / metrics.latencies.len() as f64;
+                        quic_latencies.push(avg);
                     }
                 }
             }
@@ -306,12 +339,14 @@ impl MetricsCollector {
 
         let mut tcp_errors = 0u64;
         let mut udp_errors = 0u64;
+        let mut quic_errors = 0u64;
         let mut current_errors = Vec::new();
 
         for metrics in self.connections.iter() {
             match metrics.connection_type {
                 crate::ConnectionType::Tcp => tcp_errors += metrics.errors,
                 crate::ConnectionType::Udp => udp_errors += metrics.errors,
+                crate::ConnectionType::Quic => quic_errors += metrics.errors,
             }
             current_errors.extend(metrics.error_details.clone());
         }
@@ -320,6 +355,7 @@ impl MetricsCollector {
             timestamp,
             tcp_errors,
             udp_errors,
+            quic_errors,
             error_details: current_errors,
         });
     }
@@ -338,6 +374,15 @@ impl MetricsCollector {
             .iter()
             .filter(|m| {
                 matches!(m.connection_type, crate::ConnectionType::Udp) && m.end_time.is_none()
+            })
+            .count()
+    }
+
+    pub fn get_active_quic_connections(&self) -> usize {
+        self.connections
+            .iter()
+            .filter(|m| {
+                matches!(m.connection_type, crate::ConnectionType::Quic) && m.end_time.is_none()
             })
             .count()
     }
@@ -388,6 +433,19 @@ impl MetricsCollector {
                     && matches!(
                         m.user_activity,
                         Some(crate::UserActivity::FileUpload { .. })
+                    )
+            })
+            .count()
+    }
+
+    pub fn get_active_quic_web_browsing_tasks(&self) -> usize {
+        self.connections
+            .iter()
+            .filter(|m| {
+                m.end_time.is_none()
+                    && matches!(
+                        m.user_activity,
+                        Some(crate::UserActivity::QuicWebBrowsing { .. })
                     )
             })
             .count()

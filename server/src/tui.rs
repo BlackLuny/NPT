@@ -26,10 +26,10 @@ pub struct ServerTui {
     should_quit: bool,
     show_logs: bool,
     log_scroll: usize,
-    throughput_history: Vec<(f64, f64, f64, f64)>,
+    throughput_history: Vec<(f64, f64, f64, f64, f64, f64)>,
     latency_history: Vec<(f64, f64)>,
     error_history: Vec<(f64, f64)>,
-    connection_history: Vec<(f64, f64, f64)>,
+    connection_history: Vec<(f64, f64, f64, f64)>,
     start_time: Instant,
 }
 
@@ -133,6 +133,8 @@ impl ServerTui {
                 throughput.tcp_upload_bps as f64 / 1_000_000.0,
                 throughput.tcp_download_bps as f64 / 1_000_000.0,
                 (throughput.udp_upload_bps + throughput.udp_download_bps) as f64 / 1_000_000.0,
+                throughput.quic_upload_bps as f64 / 1_000_000.0,
+                throughput.quic_download_bps as f64 / 1_000_000.0,
             ));
         }
 
@@ -146,18 +148,20 @@ impl ServerTui {
         if let Some(errors) = self.metrics.get_latest_errors() {
             self.error_history.push((
                 elapsed,
-                (errors.tcp_errors + errors.udp_errors) as f64,
+                (errors.tcp_errors + errors.udp_errors + errors.quic_errors) as f64,
             ));
         }
 
         let tcp_connections = self.metrics.get_active_tcp_connections() as f64;
         let udp_connections = self.metrics.get_active_udp_connections() as f64;
-        let _total_connections = tcp_connections + udp_connections;
+        let quic_connections = self.metrics.get_active_quic_connections() as f64;
+        let _total_connections = tcp_connections + udp_connections + quic_connections;
         
         self.connection_history.push((
             elapsed,
             tcp_connections,
             udp_connections,
+            quic_connections,
         ));
 
         const MAX_HISTORY_SIZE: usize = 120;
@@ -235,10 +239,11 @@ impl ServerTui {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
             ].as_ref())
             .split(area);
 
@@ -260,9 +265,18 @@ impl ServerTui {
 
         f.render_widget(udp_gauge, chunks[1]);
 
+        let quic_connections = self.metrics.get_active_quic_connections();
+        let quic_gauge = Gauge::default()
+            .block(Block::default().borders(Borders::ALL).title("QUIC Connections"))
+            .gauge_style(Style::default().fg(Color::Magenta))
+            .percent(std::cmp::min(quic_connections * 100 / 500, 100) as u16)
+            .label(format!("{}", quic_connections));
+
+        f.render_widget(quic_gauge, chunks[2]);
+
         let latest_throughput = self.metrics.get_latest_throughput();
         let current_mb = if let Some(tp) = latest_throughput {
-            (tp.tcp_upload_bps + tp.tcp_download_bps + tp.udp_upload_bps + tp.udp_download_bps) as f64 / 1_000_000.0
+            (tp.tcp_upload_bps + tp.tcp_download_bps + tp.udp_upload_bps + tp.udp_download_bps + tp.quic_upload_bps + tp.quic_download_bps) as f64 / 1_000_000.0
         } else {
             0.0
         };
@@ -273,11 +287,11 @@ impl ServerTui {
             .percent(std::cmp::min(current_mb as u16, 100))
             .label(format!("{:.2} MB", current_mb));
 
-        f.render_widget(throughput_gauge, chunks[2]);
+        f.render_widget(throughput_gauge, chunks[3]);
 
         let latest_errors = self.metrics.get_latest_errors();
         let error_count = if let Some(errors) = latest_errors {
-            errors.tcp_errors + errors.udp_errors
+            errors.tcp_errors + errors.udp_errors + errors.quic_errors
         } else {
             0
         };
@@ -288,7 +302,7 @@ impl ServerTui {
             .percent(std::cmp::min(error_count as u16, 100))
             .label(format!("{}", error_count));
 
-        f.render_widget(error_gauge, chunks[3]);
+        f.render_widget(error_gauge, chunks[4]);
     }
 
     fn render_charts(&self, f: &mut Frame, area: Rect) {
@@ -323,15 +337,19 @@ impl ServerTui {
         }
 
         let tcp_data: Vec<(f64, f64)> = self.connection_history.iter()
-            .map(|(time, tcp, _)| (*time, *tcp))
+            .map(|(time, tcp, _, _)| (*time, *tcp))
             .collect();
 
         let udp_data: Vec<(f64, f64)> = self.connection_history.iter()
-            .map(|(time, _, udp)| (*time, *udp))
+            .map(|(time, _, udp, _)| (*time, *udp))
+            .collect();
+
+        let quic_data: Vec<(f64, f64)> = self.connection_history.iter()
+            .map(|(time, _, _, quic)| (*time, *quic))
             .collect();
 
         let max_connections = self.connection_history.iter()
-            .map(|(_, tcp, udp)| tcp + udp)
+            .map(|(_, tcp, udp, quic)| tcp + udp + quic)
             .fold(0.0f64, f64::max)
             .max(1.0);
 
@@ -346,6 +364,11 @@ impl ServerTui {
                 .marker(symbols::Marker::Dot)
                 .style(Style::default().fg(Color::Green))
                 .data(&udp_data),
+            Dataset::default()
+                .name("QUIC")
+                .marker(symbols::Marker::Dot)
+                .style(Style::default().fg(Color::Magenta))
+                .data(&quic_data),
         ];
 
         let min_time = self.connection_history.first().map(|x| x.0).unwrap_or(0.0);
@@ -371,7 +394,7 @@ impl ServerTui {
 
     fn render_throughput_sparkline(&self, f: &mut Frame, area: Rect) {
         let throughput_data: Vec<u64> = self.throughput_history.iter()
-            .map(|(_, upload, download, udp)| ((upload + download + udp) * 10.0) as u64)
+            .map(|(_, upload, download, udp, quic_up, quic_down)| ((upload + download + udp + quic_up + quic_down) * 10.0) as u64)
             .collect();
 
         if throughput_data.is_empty() {

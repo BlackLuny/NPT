@@ -10,7 +10,7 @@ use tokio::task::JoinSet;
 pub struct UserSimulator {
     config: TestConfig,
     tcp_client: TcpClient,
-    udp_client: UdpClient,
+    quic_client: QuicClient,
     #[allow(dead_code)]
     metrics: Arc<MetricsCollector>,
     connection_semaphore: Arc<Semaphore>,
@@ -23,15 +23,15 @@ impl UserSimulator {
             config.server_addresses.clone(),
             config.load_balancer.clone(),
         ));
-        
+
         let tcp_client = TcpClient::new(server_pool.clone(), metrics.clone());
-        let udp_client = UdpClient::new(server_pool.clone(), metrics.clone());
+        let quic_client = QuicClient::new(server_pool.clone(), metrics.clone());
         let connection_semaphore = Arc::new(Semaphore::new(config.concurrent_users as usize));
 
         Self {
             config,
             tcp_client,
-            udp_client,
+            quic_client,
             metrics,
             connection_semaphore,
             server_pool,
@@ -50,14 +50,21 @@ impl UserSimulator {
 
         for user_id in 0..self.config.concurrent_users {
             let tcp_client = self.tcp_client.clone();
-            let udp_client = self.udp_client.clone();
+            let quic_client = self.quic_client.clone();
             let config = self.config.clone();
             let semaphore = self.connection_semaphore.clone();
             let server_pool = self.server_pool.clone();
 
             join_set.spawn(async move {
-                Self::simulate_user_behavior(user_id, tcp_client, udp_client, config, semaphore, server_pool)
-                    .await
+                Self::simulate_user_behavior(
+                    user_id,
+                    tcp_client,
+                    quic_client,
+                    config,
+                    semaphore,
+                    server_pool,
+                )
+                .await
             });
         }
 
@@ -90,7 +97,7 @@ impl UserSimulator {
     async fn simulate_user_behavior(
         user_id: u32,
         tcp_client: TcpClient,
-        udp_client: UdpClient,
+        quic_client: QuicClient,
         config: TestConfig,
         semaphore: Arc<Semaphore>,
         _server_pool: Arc<ServerPool>,
@@ -122,7 +129,9 @@ impl UserSimulator {
 
             let activity_start = Instant::now();
             let result = match &activity {
-                UserActivity::Gaming { .. } => udp_client.simulate_user_activity(activity).await,
+                UserActivity::QuicWebBrowsing { .. } => {
+                    quic_client.simulate_user_activity(activity).await
+                }
                 _ => {
                     tcp_client
                         .simulate_user_activity(activity, stoped.clone())
@@ -172,30 +181,30 @@ impl UserSimulator {
 
         let normalized_web = weights.web_browsing / total_weight;
         let normalized_download = normalized_web + (weights.file_download / total_weight);
-        let normalized_upload = normalized_download + (weights.file_upload / total_weight);
 
         if random_weight < normalized_web {
-            UserActivity::WebBrowsing {
-                pages_to_visit: rng.gen_range(1..=5),
-                requests_per_page: (rng.gen_range(2..=5), rng.gen_range(5..=10)),
+            // Randomly choose between TCP WebBrowsing and QUIC WebBrowsing
+            if rng.gen_bool(0.95) {
+                UserActivity::WebBrowsing {
+                    pages_to_visit: rng.gen_range(1..=5),
+                    requests_per_page: (rng.gen_range(2..=5), rng.gen_range(5..=10)),
+                }
+            } else {
+                UserActivity::QuicWebBrowsing {
+                    pages_to_visit: rng.gen_range(1..=5),
+                    resources_per_page: (rng.gen_range(2..=5), rng.gen_range(5..=10)),
+                    concurrent_requests: rng.gen_range(1..=4),
+                }
             }
         } else if random_weight < normalized_download {
             UserActivity::FileDownload {
                 file_size: rng.gen_range(1024..=1 * 1024 * 1024),
                 chunk_size: config.user_behavior.tcp_settings.request_size_range,
             }
-        } else if random_weight < normalized_upload {
+        } else {
             UserActivity::FileUpload {
                 file_size: rng.gen_range(1024..=1 * 1024 * 1024),
                 chunk_size: config.user_behavior.tcp_settings.request_size_range,
-            }
-        } else {
-            UserActivity::Gaming {
-                packets_per_second: rng.gen_range(
-                    config.user_behavior.udp_settings.packets_per_second_range.0
-                        ..=config.user_behavior.udp_settings.packets_per_second_range.1,
-                ),
-                packet_size_range: config.user_behavior.udp_settings.packet_size_range,
             }
         }
     }
@@ -231,14 +240,14 @@ impl TcpClient {
 }
 
 #[derive(Clone)]
-pub struct UdpClient {
-    inner: crate::udp_client::UdpClient,
+pub struct QuicClient {
+    inner: crate::quic_client::QuicClient,
 }
 
-impl UdpClient {
+impl QuicClient {
     pub fn new(server_pool: Arc<ServerPool>, metrics: Arc<MetricsCollector>) -> Self {
         Self {
-            inner: crate::udp_client::UdpClient::new(server_pool, metrics),
+            inner: crate::quic_client::QuicClient::new(server_pool, metrics),
         }
     }
 

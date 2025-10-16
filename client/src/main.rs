@@ -1,10 +1,11 @@
+mod quic_client;
 mod server_pool;
 mod simulator;
 mod tcp_client;
 mod tui;
-mod udp_client;
 
 use clap::{Arg, Command};
+use rustls::crypto::CryptoProvider;
 use shared::{LogBuffer, MetricsCollector, OutputFormat, TestConfig, TestReport, TuiLogFormatter};
 use simulator::UserSimulator;
 use std::net::SocketAddr;
@@ -17,6 +18,7 @@ use tui::ClientTui;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     // Create log buffer for TUI
     let log_buffer = LogBuffer::new(1000);
 

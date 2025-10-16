@@ -1,8 +1,10 @@
+mod quic_server;
 mod tcp_server;
 mod tui;
 mod udp_server;
 
 use clap::{Arg, Command};
+use quic_server::QuicServer;
 use shared::{LogBuffer, MetricsCollector, OutputFormat, TestReport, TuiLogFormatter};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -16,6 +18,7 @@ use udp_server::UdpServer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     // Create log buffer for TUI
     let log_buffer = LogBuffer::new(1000);
 
@@ -66,6 +69,12 @@ async fn main() -> anyhow::Result<()> {
                 .help("UDP server port (default: same as main address)"),
         )
         .arg(
+            Arg::new("quic-port")
+                .long("quic-port")
+                .value_name("PORT")
+                .help("QUIC server port (default: same as main address)"),
+        )
+        .arg(
             Arg::new("no-tui")
                 .long("no-tui")
                 .help("Disable the TUI and run in headless mode")
@@ -109,6 +118,13 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("Invalid UDP port"))?
         .unwrap_or(bind_addr.port());
 
+    let quic_port = matches
+        .get_one::<String>("quic-port")
+        .map(|p| p.parse::<u16>())
+        .transpose()
+        .map_err(|_| anyhow::anyhow!("Invalid QUIC port"))?
+        .unwrap_or(bind_addr.port());
+
     let no_tui = matches.get_flag("no-tui");
     let output_path = matches.get_one::<String>("output").unwrap();
     let format_str = matches.get_one::<String>("format").unwrap();
@@ -126,12 +142,16 @@ async fn main() -> anyhow::Result<()> {
 
     let tcp_addr = SocketAddr::new(bind_addr.ip(), tcp_port);
     let udp_addr = SocketAddr::new(bind_addr.ip(), udp_port);
+    let quic_addr = SocketAddr::new(bind_addr.ip(), quic_port);
 
-    info!("Starting server - TCP: {}, UDP: {}", tcp_addr, udp_addr);
+    info!(
+        "Starting server - TCP: {}, UDP: {}, QUIC: {}",
+        tcp_addr, udp_addr, quic_addr
+    );
 
     let metrics = Arc::new(MetricsCollector::new());
     let tcp_server = TcpServer::new(tcp_addr, metrics.clone());
-    let udp_server = UdpServer::new(udp_addr, metrics.clone());
+    let quic_server = QuicServer::new(quic_addr, metrics.clone());
 
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
 
@@ -157,9 +177,9 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let udp_task = tokio::spawn(async move {
-        if let Err(e) = udp_server.start().await {
-            warn!("UDP server error: {}", e);
+    let quic_task = tokio::spawn(async move {
+        if let Err(e) = quic_server.start().await {
+            warn!("QUIC server error: {}", e);
         }
     });
 
@@ -167,7 +187,7 @@ async fn main() -> anyhow::Result<()> {
         info!("Running in headless mode. Press Ctrl+C to stop.");
         tokio::select! {
             _ = tcp_task => warn!("TCP server task ended"),
-            _ = udp_task => warn!("UDP server task ended"),
+            _ = quic_task => warn!("QUIC server task ended"),
             _ = shutdown_rx.recv() => {
                 info!("Received shutdown signal, stopping server...");
             }
@@ -187,7 +207,7 @@ async fn main() -> anyhow::Result<()> {
 
         tokio::select! {
             _ = tcp_task => warn!("TCP server task ended"),
-            _ = udp_task => warn!("UDP server task ended"),
+            _ = quic_task => warn!("QUIC server task ended"),
             tui_result = tui.run() => {
                 match tui_result {
                     Ok(_) => info!("TUI exited normally"),
