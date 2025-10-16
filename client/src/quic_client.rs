@@ -6,12 +6,14 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use shared::{ConnectionType, ErrorType, MetricsCollector, UserActivity};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct QuicClient {
     server_pool: Arc<ServerPool>,
     metrics: Arc<MetricsCollector>,
+    udp_conn_sem: Arc<Semaphore>,
 }
 
 /// Dummy certificate verifier that treats any certificate as valid.
@@ -75,10 +77,12 @@ impl QuicClient {
         Self {
             server_pool,
             metrics,
+            udp_conn_sem: Arc::new(Semaphore::new(100)),
         }
     }
 
     pub async fn simulate_user_activity(&self, activity: UserActivity) -> anyhow::Result<()> {
+        let _permit = self.udp_conn_sem.acquire().await?;
         match activity {
             UserActivity::QuicWebBrowsing {
                 pages_to_visit,
