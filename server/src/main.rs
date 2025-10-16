@@ -1,7 +1,6 @@
 mod quic_server;
 mod tcp_server;
 mod tui;
-mod udp_server;
 
 use clap::{Arg, Command};
 use quic_server::QuicServer;
@@ -14,7 +13,6 @@ use tokio::signal;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use tui::ServerTui;
-use udp_server::UdpServer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -63,12 +61,6 @@ async fn main() -> anyhow::Result<()> {
                 .help("TCP server port (default: same as main address)"),
         )
         .arg(
-            Arg::new("udp-port")
-                .long("udp-port")
-                .value_name("PORT")
-                .help("UDP server port (default: same as main address)"),
-        )
-        .arg(
             Arg::new("quic-port")
                 .long("quic-port")
                 .value_name("PORT")
@@ -111,13 +103,6 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("Invalid TCP port"))?
         .unwrap_or(bind_addr.port());
 
-    let udp_port = matches
-        .get_one::<String>("udp-port")
-        .map(|p| p.parse::<u16>())
-        .transpose()
-        .map_err(|_| anyhow::anyhow!("Invalid UDP port"))?
-        .unwrap_or(bind_addr.port());
-
     let quic_port = matches
         .get_one::<String>("quic-port")
         .map(|p| p.parse::<u16>())
@@ -141,13 +126,9 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let tcp_addr = SocketAddr::new(bind_addr.ip(), tcp_port);
-    let udp_addr = SocketAddr::new(bind_addr.ip(), udp_port);
     let quic_addr = SocketAddr::new(bind_addr.ip(), quic_port);
 
-    info!(
-        "Starting server - TCP: {}, UDP: {}, QUIC: {}",
-        tcp_addr, udp_addr, quic_addr
-    );
+    info!("Starting server - TCP: {}, QUIC: {}", tcp_addr, quic_addr);
 
     let metrics = Arc::new(MetricsCollector::new());
     let tcp_server = TcpServer::new(tcp_addr, metrics.clone());
