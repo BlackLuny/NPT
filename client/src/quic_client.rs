@@ -13,7 +13,6 @@ use uuid::Uuid;
 pub struct QuicClient {
     server_pool: Arc<ServerPool>,
     metrics: Arc<MetricsCollector>,
-    udp_conn_sem: Arc<Semaphore>,
 }
 
 /// Dummy certificate verifier that treats any certificate as valid.
@@ -77,12 +76,10 @@ impl QuicClient {
         Self {
             server_pool,
             metrics,
-            udp_conn_sem: Arc::new(Semaphore::new(100)),
         }
     }
 
     pub async fn simulate_user_activity(&self, activity: UserActivity) -> anyhow::Result<()> {
-        let _permit = self.udp_conn_sem.acquire().await?;
         match activity {
             UserActivity::QuicWebBrowsing {
                 pages_to_visit,
@@ -143,7 +140,7 @@ impl QuicClient {
 
         // Connect to server
         let connection = match tokio::time::timeout(
-            Duration::from_secs(10),
+            Duration::from_secs(30),
             endpoint.connect(server_addr, "localhost")?,
         )
         .await
