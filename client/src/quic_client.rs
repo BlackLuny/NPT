@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 #[derive(Clone)]
 pub struct QuicClient {
     server_pool: Arc<ServerPool>,
@@ -140,7 +142,7 @@ impl QuicClient {
 
         // Connect to server
         let connection = match tokio::time::timeout(
-            Duration::from_secs(30),
+            REQUEST_TIMEOUT,
             endpoint.connect(server_addr, "localhost")?,
         )
         .await
@@ -246,7 +248,7 @@ impl QuicClient {
 
         // Request main HTML page first
         match tokio::time::timeout(
-            Duration::from_secs(10),
+            REQUEST_TIMEOUT,
             self.request_resource(
                 connection,
                 connection_id,
@@ -278,7 +280,7 @@ impl QuicClient {
                 };
 
                 match tokio::time::timeout(
-                    Duration::from_secs(5),
+                    REQUEST_TIMEOUT,
                     self.request_resource(connection, connection_id, session_id, &resource_path),
                 )
                 .await
@@ -297,7 +299,7 @@ impl QuicClient {
             .buffer_unordered(concurrent_requests as usize)
             .collect::<Vec<_>>();
 
-        let results = tokio::time::timeout(Duration::from_secs(10), resource_futures).await?;
+        let results = tokio::time::timeout(REQUEST_TIMEOUT, resource_futures).await?;
         let all_successful = results.iter().all(|result| result.is_ok());
         if all_successful {
             successful_requests += num_resources;

@@ -399,6 +399,31 @@ impl MetricsCollector {
         self.error_history.read().last().cloned()
     }
 
+    // Non-blocking versions for TUI responsiveness
+    pub fn try_get_latest_throughput(&self) -> Option<ThroughputSample> {
+        if let Some(guard) = self.throughput_history.try_read() {
+            guard.last().cloned()
+        } else {
+            None
+        }
+    }
+
+    pub fn try_get_latest_latency(&self) -> Option<LatencySample> {
+        if let Some(guard) = self.latency_history.try_read() {
+            guard.last().cloned()
+        } else {
+            None
+        }
+    }
+
+    pub fn try_get_latest_errors(&self) -> Option<ErrorSample> {
+        if let Some(guard) = self.error_history.try_read() {
+            guard.last().cloned()
+        } else {
+            None
+        }
+    }
+
     pub fn get_active_web_browsing_tasks(&self) -> usize {
         self.connections
             .iter()

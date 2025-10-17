@@ -1,43 +1,43 @@
 {
   "summary": {
     "test_duration": {
-      "secs": 1,
-      "nanos": 894896000
+      "secs": 0,
+      "nanos": 1000
     },
-    "start_time": "2025-10-13T09:07:46.687709Z",
-    "end_time": "2025-10-13T09:07:48.582605Z",
-    "total_connections": 14,
+    "start_time": "2025-10-16T14:30:29.885626Z",
+    "end_time": "2025-10-16T14:30:29.885627Z",
+    "total_connections": 0,
     "successful_connections": 0,
-    "failed_connections": 14,
+    "failed_connections": 0,
     "total_bytes_sent": 0,
     "total_bytes_received": 0,
     "total_packets_sent": 0,
     "total_packets_received": 0
   },
   "performance": {
-    "avg_throughput_mbps": null,
+    "avg_throughput_mbps": 0.0,
     "peak_throughput_mbps": 0.0,
     "avg_latency_ms": 0.0,
     "p50_latency_ms": 0.0,
     "p95_latency_ms": 0.0,
     "p99_latency_ms": 0.0,
-    "error_rate": 1.0,
+    "error_rate": 0.0,
     "connections_per_second": 0.0
   },
   "connections": {
-    "tcp_connections": 14,
+    "tcp_connections": 0,
     "udp_connections": 0,
     "avg_connection_duration": {
       "secs": 0,
-      "nanos": 108770714
+      "nanos": 0
     },
     "max_connection_duration": {
       "secs": 0,
-      "nanos": 304393000
+      "nanos": 0
     },
     "min_connection_duration": {
       "secs": 0,
-      "nanos": 77000
+      "nanos": 0
     }
   },
   "throughput": {
@@ -85,189 +85,17 @@
     }
   },
   "errors": {
-    "total_errors": 14,
-    "tcp_errors": 14,
+    "total_errors": 0,
+    "tcp_errors": 0,
     "udp_errors": 0,
-    "error_rate": 1.0,
+    "error_rate": 0.0,
     "error_distribution": {
       "udp_errors": 0,
-      "tcp_errors": 14
+      "tcp_errors": 0
     },
-    "error_types": {
-      "Other": 14
-    },
-    "error_details": [
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:47.710576Z",
-        "connection_id": "ccf756e1-ac45-4d58-a427-fdbd2face611",
-        "context": "Web browsing - page 3"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:48.237245Z",
-        "connection_id": "0cde8756-bec7-4831-9bac-d236abb39e69",
-        "context": "Web browsing - page 4"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:47.991954Z",
-        "connection_id": "16ac4e3e-7f97-4ca0-a88d-fe91e706f4e1",
-        "context": "Web browsing - page 4"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:46.992093Z",
-        "connection_id": "e09ee229-0948-41fd-9e75-f4a9c105e723",
-        "context": "Web browsing - page 1"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:46.992087Z",
-        "connection_id": "0e9ce971-5af3-40cd-8b7a-736f7c52719d",
-        "context": "Web browsing - page 1"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:47.194901Z",
-        "connection_id": "cf290ff6-a7c4-4cd4-8bb8-c805a74a3de8",
-        "context": "Web browsing - page 2"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:46.992106Z",
-        "connection_id": "13d33dec-c372-4e0c-bfef-ffaea99d0a1f",
-        "context": "Web browsing - page 1"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:47.269728Z",
-        "connection_id": "bcfd84b3-0236-4f7d-a503-db10363b4efb",
-        "context": "Web browsing - page 2"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:48.582581Z",
-        "connection_id": "1d76745e-00d3-4688-adc5-dd26aa1455ec",
-        "context": "Web browsing - page 5"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:46.992111Z",
-        "connection_id": "18bb045b-c148-475a-b8b3-2f96f190aec9",
-        "context": "Web browsing - page 1"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:47.762743Z",
-        "connection_id": "c3080451-506f-4c85-ac4c-b71c6b9a9a4d",
-        "context": "Web browsing - page 3"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:47.339886Z",
-        "connection_id": "31da8dbe-5477-48fe-be10-86db10d5e295",
-        "context": "Web browsing - page 2"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:46.992079Z",
-        "connection_id": "0df40aac-10e1-4e9b-8f3c-f7d8ebec8870",
-        "context": "Web browsing - page 1"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:47.201870Z",
-        "connection_id": "761f9897-23f4-4f6d-9e08-ea7af259031d",
-        "context": "Web browsing - page 2"
-      }
-    ],
-    "most_recent_errors": [
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:48.582581Z",
-        "connection_id": "1d76745e-00d3-4688-adc5-dd26aa1455ec",
-        "context": "Web browsing - page 5"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:48.237245Z",
-        "connection_id": "0cde8756-bec7-4831-9bac-d236abb39e69",
-        "context": "Web browsing - page 4"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:47.991954Z",
-        "connection_id": "16ac4e3e-7f97-4ca0-a88d-fe91e706f4e1",
-        "context": "Web browsing - page 4"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:47.762743Z",
-        "connection_id": "c3080451-506f-4c85-ac4c-b71c6b9a9a4d",
-        "context": "Web browsing - page 3"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:47.710576Z",
-        "connection_id": "ccf756e1-ac45-4d58-a427-fdbd2face611",
-        "context": "Web browsing - page 3"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:47.339886Z",
-        "connection_id": "31da8dbe-5477-48fe-be10-86db10d5e295",
-        "context": "Web browsing - page 2"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:47.269728Z",
-        "connection_id": "bcfd84b3-0236-4f7d-a503-db10363b4efb",
-        "context": "Web browsing - page 2"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:47.201870Z",
-        "connection_id": "761f9897-23f4-4f6d-9e08-ea7af259031d",
-        "context": "Web browsing - page 2"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:47.194901Z",
-        "connection_id": "cf290ff6-a7c4-4cd4-8bb8-c805a74a3de8",
-        "context": "Web browsing - page 2"
-      },
-      {
-        "error_type": "Other",
-        "message": "No healthy servers available",
-        "timestamp": "2025-10-13T09:07:46.992111Z",
-        "connection_id": "18bb045b-c148-475a-b8b3-2f96f190aec9",
-        "context": "Web browsing - page 1"
-      }
-    ]
+    "error_types": {},
+    "error_details": [],
+    "most_recent_errors": []
   },
   "raw_data": null
 }
