@@ -95,7 +95,10 @@ impl TcpClient {
                         ErrorType::Other
                     };
 
-                    tracing::warn!("Web browsing simulation failed: {}", e);
+                    tracing::warn!(
+                        "Web browsing simulation failed: {} connection id: {connection_id:?} session id: {session_id:?}",
+                        e
+                    );
                     self.metrics.record_error_with_detail(
                         &connection_id,
                         error_type,
@@ -122,6 +125,13 @@ impl TcpClient {
         stoped: Arc<AtomicBool>,
     ) -> anyhow::Result<()> {
         let (mut stream, server_addr) = self.connect_with_failover().await?;
+        tracing::info!(
+            "simulate_single_page Connected to server: {} local address: {} connection_id: {} session_id: {}",
+            server_addr,
+            stream.local_addr()?,
+            connection_id.to_string(),
+            session_id.to_string()
+        );
 
         let _ = stream.set_nodelay(true);
 
@@ -130,12 +140,24 @@ impl TcpClient {
         let handshake_msg = Message::new(MessageType::TlsHandshake, handshake_data, session_id);
 
         let request_start = Instant::now();
-        let handshake_size = self.send_message(&mut stream, &handshake_msg).await?;
+        let handshake_size = match self.send_message(&mut stream, &handshake_msg).await {
+            Ok(o) => o,
+            Err(e) => {
+                tracing::debug!("connection id: {connection_id:?} session id: {session_id:?} send handshake message failed: {}", e);
+                return Err(e);
+            }
+        };
         self.metrics.record_packet_sent(&connection_id);
         self.metrics
             .record_bytes_sent(&connection_id, handshake_size as u64);
 
-        let (_response, length) = self.receive_response(&mut stream).await?;
+        let (_response, length) = match self.receive_response(&mut stream).await {
+            Ok(o) => o,
+            Err(e) => {
+                tracing::debug!("connection id: {connection_id:?} session id: {session_id:?} receive handshake message failed: {}", e);
+                return Err(e);
+            }
+        };
         let handshake_latency = request_start.elapsed();
         self.metrics
             .record_latency(&connection_id, handshake_latency);
@@ -152,12 +174,24 @@ impl TcpClient {
                 .with_sequence(request_num as u64);
 
             let request_start = Instant::now();
-            let request_size = self.send_message(&mut stream, &http_request).await?;
+            let request_size = match self.send_message(&mut stream, &http_request).await {
+                Ok(o) => o,
+                Err(e) => {
+                    tracing::debug!("connection id: {connection_id:?} session id: {session_id:?} send http request message failed: {}", e);
+                    return Err(e);
+                }
+            };
             self.metrics.record_packet_sent(&connection_id);
             self.metrics
                 .record_bytes_sent(&connection_id, request_size as u64);
 
-            let (_response, length) = self.receive_response(&mut stream).await?;
+            let (_response, length) = match self.receive_response(&mut stream).await {
+                Ok(o) => o,
+                Err(e) => {
+                    tracing::debug!("connection id: {connection_id:?} session id: {session_id:?} receive http response message failed: {}", e);
+                    return Err(e);
+                }
+            };
             let request_latency = request_start.elapsed();
             self.metrics.record_latency(&connection_id, request_latency);
             self.metrics.record_packet_received(&connection_id);
@@ -172,7 +206,13 @@ impl TcpClient {
         }
 
         let close_msg = Message::new(MessageType::ConnectionClose, vec![], session_id);
-        self.send_message(&mut stream, &close_msg).await?;
+        match self.send_message(&mut stream, &close_msg).await {
+            Ok(o) => o,
+            Err(e) => {
+                tracing::debug!("connection id: {connection_id:?} session id: {session_id:?} send connection close message failed: {}", e);
+                return Err(e);
+            }
+        };
 
         self.server_pool.mark_connection_end(server_addr).await;
 
@@ -239,6 +279,12 @@ impl TcpClient {
         stoped: Arc<AtomicBool>,
     ) -> anyhow::Result<()> {
         let (mut stream, server_addr) = self.connect_with_failover().await?;
+        tracing::info!(
+            "perform_file_download Connected to server: {} local address: {} connection_id: {}",
+            server_addr,
+            stream.local_addr()?,
+            connection_id.to_string()
+        );
 
         let _ = stream.set_nodelay(true);
         let request_data = file_size.to_le_bytes().to_vec();
@@ -341,6 +387,12 @@ impl TcpClient {
         stoped: Arc<AtomicBool>,
     ) -> anyhow::Result<()> {
         let (mut stream, server_addr) = self.connect_with_failover().await?;
+        tracing::info!(
+            "perform_file_upload Connected to server: {} local address: {} connection_id: {}",
+            server_addr,
+            stream.local_addr()?,
+            connection_id.to_string()
+        );
 
         let _ = stream.set_nodelay(true);
         let upload_request_data = file_size.to_le_bytes().to_vec();
