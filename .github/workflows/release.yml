@@ -1,0 +1,200 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create release for'
+        required: true
+        default: '1.0.0'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: .exe
+            archive: zip
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            ext: .exe
+            archive: zip
+          # Linux
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            ext: ""
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            ext: ""
+            archive: tar.gz
+          # macOS
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            ext: ""
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            ext: ""
+            archive: tar.gz
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Configure cross-compilation
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.target }}-
+            ${{ runner.os }}-cargo-
+
+      - name: Build client
+        run: cargo build --release --target ${{ matrix.target }} --bin client
+
+      - name: Build server
+        run: cargo build --release --target ${{ matrix.target }} --bin server
+
+      - name: Get target info
+        id: target_info
+        shell: bash
+        run: |
+          case "${{ matrix.target }}" in
+            *windows*) os="windows" ;;
+            *linux*) os="linux" ;;
+            *darwin*) os="macos" ;;
+          esac
+          
+          case "${{ matrix.target }}" in
+            x86_64-*) arch="x86_64" ;;
+            aarch64-*) arch="arm64" ;;
+          esac
+          
+          echo "os=$os" >> $GITHUB_OUTPUT
+          echo "arch=$arch" >> $GITHUB_OUTPUT
+
+      - name: Package binaries (Unix)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          mkdir -p artifacts
+          cd target/${{ matrix.target }}/release
+          tar -czf ../../../artifacts/npt-client-${{ steps.target_info.outputs.arch }}-${{ steps.target_info.outputs.os }}.tar.gz client${{ matrix.ext }}
+          tar -czf ../../../artifacts/npt-server-${{ steps.target_info.outputs.arch }}-${{ steps.target_info.outputs.os }}.tar.gz server${{ matrix.ext }}
+
+      - name: Package binaries (Windows)
+        if: matrix.archive == 'zip'
+        run: |
+          mkdir artifacts
+          cd target/${{ matrix.target }}/release
+          Compress-Archive -Path client${{ matrix.ext }} -DestinationPath ../../../artifacts/npt-client-${{ steps.target_info.outputs.arch }}-${{ steps.target_info.outputs.os }}.zip
+          Compress-Archive -Path server${{ matrix.ext }} -DestinationPath ../../../artifacts/npt-server-${{ steps.target_info.outputs.arch }}-${{ steps.target_info.outputs.os }}.zip
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: npt-${{ steps.target_info.outputs.arch }}-${{ steps.target_info.outputs.os }}
+          path: artifacts/*
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Organize artifacts
+        run: |
+          mkdir -p final-artifacts
+          find release-artifacts -name "*.tar.gz" -o -name "*.zip" | while read file; do
+            cp "$file" final-artifacts/
+          done
+          ls -la final-artifacts/
+
+      - name: Generate checksums
+        run: |
+          cd final-artifacts
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Get tag name
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=v${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: NPT ${{ steps.tag.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            final-artifacts/*
+          body: |
+            ## NPT Network Performance Testing Tool
+            
+            This release includes pre-compiled binaries for multiple platforms:
+            
+            ### Supported Platforms
+            - **Windows**: x86_64, ARM64
+            - **Linux**: x86_64, ARM64  
+            - **macOS**: x86_64, ARM64
+            
+            ### Usage
+            1. Download the appropriate binary for your platform
+            2. Extract the archive
+            3. Run `./client --help` or `./server --help` for usage instructions
+            
+            ### Checksums
+            SHA256 checksums are provided in `checksums.txt` for verification.
+            
+            ### Built with
+            - Rust ${{ env.RUST_VERSION }}
+            - Target platforms: Windows (MSVC), Linux (GNU), macOS
