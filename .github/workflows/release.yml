@@ -22,15 +22,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            ext: .exe
-            archive: zip
-          - target: aarch64-pc-windows-msvc
-            os: windows-latest
-            ext: .exe
-            archive: zip
           # Linux
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
@@ -94,7 +85,6 @@ jobs:
         shell: bash
         run: |
           case "${{ matrix.target }}" in
-            *windows*) os="windows" ;;
             *linux*) os="linux" ;;
             *darwin*) os="macos" ;;
           esac
@@ -114,14 +104,6 @@ jobs:
           cd target/${{ matrix.target }}/release
           tar -czf ../../../artifacts/npt-client-${{ steps.target_info.outputs.arch }}-${{ steps.target_info.outputs.os }}.tar.gz client${{ matrix.ext }}
           tar -czf ../../../artifacts/npt-server-${{ steps.target_info.outputs.arch }}-${{ steps.target_info.outputs.os }}.tar.gz server${{ matrix.ext }}
-
-      - name: Package binaries (Windows)
-        if: matrix.archive == 'zip'
-        run: |
-          mkdir artifacts
-          cd target/${{ matrix.target }}/release
-          Compress-Archive -Path client${{ matrix.ext }} -DestinationPath ../../../artifacts/npt-client-${{ steps.target_info.outputs.arch }}-${{ steps.target_info.outputs.os }}.zip
-          Compress-Archive -Path server${{ matrix.ext }} -DestinationPath ../../../artifacts/npt-server-${{ steps.target_info.outputs.arch }}-${{ steps.target_info.outputs.os }}.zip
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -147,7 +129,7 @@ jobs:
       - name: Organize artifacts
         run: |
           mkdir -p final-artifacts
-          find release-artifacts -name "*.tar.gz" -o -name "*.zip" | while read file; do
+          find release-artifacts -name "*.tar.gz" | while read file; do
             cp "$file" final-artifacts/
           done
           ls -la final-artifacts/
@@ -183,7 +165,6 @@ jobs:
             This release includes pre-compiled binaries for multiple platforms:
             
             ### Supported Platforms
-            - **Windows**: x86_64, ARM64
             - **Linux**: x86_64, ARM64  
             - **macOS**: x86_64, ARM64
             
@@ -197,4 +178,4 @@ jobs:
             
             ### Built with
             - Rust ${{ env.RUST_VERSION }}
-            - Target platforms: Windows (MSVC), Linux (GNU), macOS
+            - Target platforms: Linux (GNU), macOS
