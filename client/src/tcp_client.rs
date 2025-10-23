@@ -124,6 +124,7 @@ impl TcpClient {
         requests_per_page: (u32, u32),
         stoped: Arc<AtomicBool>,
     ) -> anyhow::Result<()> {
+        let request_start = Instant::now();
         let (mut stream, server_addr) = self.connect_with_failover().await?;
         tracing::info!(
             "simulate_single_page Connected to server: {} local address: {} connection_id: {} session_id: {}",
@@ -139,7 +140,6 @@ impl TcpClient {
         let handshake_data = vec![0u8; handshake_size];
         let handshake_msg = Message::new(MessageType::TlsHandshake, handshake_data, session_id);
 
-        let request_start = Instant::now();
         let handshake_size = match self.send_message(&mut stream, &handshake_msg).await {
             Ok(o) => o,
             Err(e) => {
@@ -159,6 +159,10 @@ impl TcpClient {
             }
         };
         let handshake_latency = request_start.elapsed();
+        tracing::debug!(
+            "connection id: {connection_id:?} session id: {session_id:?} handshake latency: {}ms",
+            handshake_latency.as_millis()
+        );
         self.metrics
             .record_latency(&connection_id, handshake_latency);
         self.metrics.record_packet_received(&connection_id);
@@ -193,6 +197,10 @@ impl TcpClient {
                 }
             };
             let request_latency = request_start.elapsed();
+            tracing::debug!(
+                "connection id: {connection_id:?} session id: {session_id:?} request latency: {}ms",
+                request_latency.as_millis()
+            );
             self.metrics.record_latency(&connection_id, request_latency);
             self.metrics.record_packet_received(&connection_id);
             self.metrics
@@ -496,20 +504,24 @@ impl TcpClient {
     async fn connect_with_failover(&self) -> anyhow::Result<(TcpStream, SocketAddr)> {
         let max_retries = 3;
         let mut last_error = None;
-
+        let now = Instant::now();
         for attempt in 0..max_retries {
-            if let Some(server_addr) = self.server_pool.get_server().await {
+            if let Some(server_addr) = self.server_pool.get_server() {
                 match TcpStream::connect(server_addr).await {
                     Ok(stream) => {
-                        self.server_pool.mark_connection_start(server_addr).await;
-                        self.server_pool.mark_connection_success(server_addr).await;
+                        tracing::info!(
+                            "Connection attempt {} succeeded in {}ms",
+                            attempt + 1,
+                            now.elapsed().as_millis()
+                        );
+                        self.server_pool.mark_connection_start(server_addr);
+                        self.server_pool.mark_connection_success(server_addr);
                         return Ok((stream, server_addr));
                     }
                     Err(e) => {
                         let error_msg = format!("Connection attempt {} failed: {}", attempt + 1, e);
                         self.server_pool
-                            .mark_connection_failed(server_addr, &error_msg)
-                            .await;
+                            .mark_connection_failed(server_addr, &error_msg);
                         last_error = Some(e);
 
                         if attempt < max_retries - 1 {

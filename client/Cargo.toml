@@ -29,3 +29,4 @@ rustls = { workspace = true }
 bytes = { workspace = true }
 http = { workspace = true }
 futures = {workspace = true}
+dashmap = {workspace = true}

@@ -6,7 +6,6 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use shared::{ConnectionType, ErrorType, MetricsCollector, UserActivity};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -120,12 +119,12 @@ impl QuicClient {
             },
         );
 
-        let server_addr =
-            self.server_pool.get_server().await.ok_or_else(|| {
-                anyhow::anyhow!("No healthy servers available for QUIC connection")
-            })?;
+        let server_addr = self
+            .server_pool
+            .get_server()
+            .ok_or_else(|| anyhow::anyhow!("No healthy servers available for QUIC connection"))?;
 
-        self.server_pool.mark_connection_start(server_addr).await;
+        self.server_pool.mark_connection_start(server_addr);
 
         // Create QUIC endpoint with insecure certificate verification
         let mut endpoint = Endpoint::client("0.0.0.0:0".parse()?)?;

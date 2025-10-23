@@ -124,7 +124,7 @@ impl Default for HealthCheckConfig {
         Self {
             enabled: true,
             timeout: Duration::from_secs(5),
-            interval: Duration::from_secs(30),
+            interval: Duration::from_secs(300),
             failure_threshold: 3,
             recovery_threshold: 2,
         }
