@@ -59,7 +59,7 @@ pub struct ActivityWeights {
     pub web_browsing: f32,
     pub file_download: f32,
     pub file_upload: f32,
-    pub gaming: f32,
+    pub quic_browsing: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,10 +164,10 @@ impl Default for UserBehaviorConfig {
             think_time_range: (Duration::from_millis(100), Duration::from_secs(10)),
             connection_interval_range: (Duration::from_millis(50), Duration::from_secs(2)),
             activity_weights: ActivityWeights {
-                web_browsing: 0.98,
+                web_browsing: 0.95,
                 file_download: 0.000,
                 file_upload: 0.000,
-                gaming: 0.000,
+                quic_browsing: 0.05,
             },
             tcp_settings: TcpSettings::default(),
             udp_settings: UdpSettings::default(),

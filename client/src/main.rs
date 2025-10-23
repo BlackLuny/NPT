@@ -76,6 +76,34 @@ async fn main() -> anyhow::Result<()> {
                 .value_name("PATH")
                 .help("Path to log file (enables file logging)"),
         )
+        .arg(
+            Arg::new("web-weight")
+                .long("web-weight")
+                .value_name("WEIGHT")
+                .help("Weight for TCP web browsing activity")
+                .default_value("0.95"),
+        )
+        .arg(
+            Arg::new("download-weight")
+                .long("download-weight")
+                .value_name("WEIGHT")
+                .help("Weight for file download activity")
+                .default_value("0.0"),
+        )
+        .arg(
+            Arg::new("upload-weight")
+                .long("upload-weight")
+                .value_name("WEIGHT")
+                .help("Weight for file upload activity")
+                .default_value("0.0"),
+        )
+        .arg(
+            Arg::new("quic-weight")
+                .long("quic-weight")
+                .value_name("WEIGHT")
+                .help("Weight for QUIC web browsing activity")
+                .default_value("0.05"),
+        )
         .get_matches();
 
     let servers_str = matches.get_one::<String>("servers").unwrap();
@@ -107,6 +135,49 @@ async fn main() -> anyhow::Result<()> {
     let output_path = matches.get_one::<String>("output").unwrap();
     let format_str = matches.get_one::<String>("format").unwrap();
     let log_file_path = matches.get_one::<String>("log-file");
+
+    // Parse weight arguments
+    let web_weight: f32 = matches
+        .get_one::<String>("web-weight")
+        .unwrap()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid web weight"))?;
+    
+    let download_weight: f32 = matches
+        .get_one::<String>("download-weight")
+        .unwrap()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid download weight"))?;
+    
+    let upload_weight: f32 = matches
+        .get_one::<String>("upload-weight")
+        .unwrap()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid upload weight"))?;
+    
+    let quic_weight: f32 = matches
+        .get_one::<String>("quic-weight")
+        .unwrap()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid quic weight"))?;
+
+    // Validate weights are non-negative
+    if web_weight < 0.0 || download_weight < 0.0 || upload_weight < 0.0 || quic_weight < 0.0 {
+        return Err(anyhow::anyhow!("All weights must be non-negative"));
+    }
+
+    // Normalize weights
+    let total_weight = web_weight + download_weight + upload_weight + quic_weight;
+    if total_weight == 0.0 {
+        return Err(anyhow::anyhow!("At least one weight must be greater than 0"));
+    }
+
+    let normalized_weights = shared::ActivityWeights {
+        web_browsing: web_weight / total_weight,
+        file_download: download_weight / total_weight,
+        file_upload: upload_weight / total_weight,
+        quic_browsing: quic_weight / total_weight,
+    };
 
     // Create log buffer for TUI and optionally file logging
     let log_buffer = if let Some(log_path) = log_file_path {
@@ -155,6 +226,7 @@ async fn main() -> anyhow::Result<()> {
     config.duration = Duration::from_secs(duration_secs);
     config.reporting.output_format = output_format;
     config.reporting.output_path = output_path.clone();
+    config.user_behavior.activity_weights = normalized_weights;
 
     info!(
         "Starting client with config: servers={:?}, users={}, duration={:?}",

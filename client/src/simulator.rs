@@ -176,35 +176,33 @@ impl UserSimulator {
         let random_weight: f32 = rng.gen();
 
         let weights = &config.user_behavior.activity_weights;
-        let total_weight =
-            weights.web_browsing + weights.file_download + weights.file_upload + weights.gaming;
+        
+        // Calculate cumulative probabilities
+        let web_threshold = weights.web_browsing;
+        let download_threshold = web_threshold + weights.file_download;
+        let upload_threshold = download_threshold + weights.file_upload;
+        // quic_browsing covers the remaining weight (1.0 - upload_threshold)
 
-        let normalized_web = weights.web_browsing / total_weight;
-        let normalized_download = normalized_web + (weights.file_download / total_weight);
-
-        if random_weight < normalized_web {
-            // Randomly choose between TCP WebBrowsing and QUIC WebBrowsing
-            if rng.gen_bool(0.95) {
-                UserActivity::WebBrowsing {
-                    pages_to_visit: rng.gen_range(1..=5),
-                    requests_per_page: (rng.gen_range(2..=5), rng.gen_range(5..=10)),
-                }
-            } else {
-                UserActivity::QuicWebBrowsing {
-                    pages_to_visit: rng.gen_range(1..=5),
-                    resources_per_page: (rng.gen_range(2..=5), rng.gen_range(5..=10)),
-                    concurrent_requests: rng.gen_range(1..=4),
-                }
+        if random_weight < web_threshold {
+            UserActivity::WebBrowsing {
+                pages_to_visit: rng.gen_range(1..=5),
+                requests_per_page: (rng.gen_range(2..=5), rng.gen_range(5..=10)),
             }
-        } else if random_weight < normalized_download {
+        } else if random_weight < download_threshold {
             UserActivity::FileDownload {
                 file_size: rng.gen_range(1024..=1 * 1024 * 1024),
                 chunk_size: config.user_behavior.tcp_settings.request_size_range,
             }
-        } else {
+        } else if random_weight < upload_threshold {
             UserActivity::FileUpload {
                 file_size: rng.gen_range(1024..=1 * 1024 * 1024),
                 chunk_size: config.user_behavior.tcp_settings.request_size_range,
+            }
+        } else {
+            UserActivity::QuicWebBrowsing {
+                pages_to_visit: rng.gen_range(1..=5),
+                resources_per_page: (rng.gen_range(2..=5), rng.gen_range(5..=10)),
+                concurrent_requests: rng.gen_range(1..=4),
             }
         }
     }

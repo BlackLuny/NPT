@@ -110,7 +110,7 @@ impl TcpClient {
 
             self.metrics.end_connection(&connection_id);
 
-            let think_time = Duration::from_millis(rand::thread_rng().gen_range(300..1000));
+            let think_time = Duration::from_millis(rand::thread_rng().gen_range(1000..3000));
             tokio::time::sleep(think_time).await;
         }
 
