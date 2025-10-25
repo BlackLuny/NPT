@@ -24,6 +24,7 @@ parking_lot = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 libc = "0.2"
+socket2 = { version = "0.6", features = ["all"] }
 quinn = { workspace = true }
 rustls = { workspace = true }
 bytes = { workspace = true }

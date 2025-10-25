@@ -125,6 +125,13 @@ impl UserSimulator {
         });
 
         while start_time.elapsed() < user_session_duration {
+            let think_time = Self::generate_think_time(&config);
+            tokio::time::sleep(think_time).await;
+            if think_time + start_time.elapsed() > user_session_duration
+                || stoped.load(Ordering::Relaxed)
+            {
+                break;
+            }
             let activity = Self::choose_random_activity(&config);
 
             let activity_start = Instant::now();
@@ -151,14 +158,6 @@ impl UserSimulator {
                     tracing::warn!("User {} activity failed: {}", user_id, e);
                 }
             }
-
-            let think_time = Self::generate_think_time(&config);
-            tokio::time::sleep(think_time).await;
-            if think_time + start_time.elapsed() > user_session_duration
-                || stoped.load(Ordering::Relaxed)
-            {
-                break;
-            }
         }
 
         tracing::debug!("User {} finished session", user_id);
@@ -176,7 +175,7 @@ impl UserSimulator {
         let random_weight: f32 = rng.gen();
 
         let weights = &config.user_behavior.activity_weights;
-        
+
         // Calculate cumulative probabilities
         let web_threshold = weights.web_browsing;
         let download_threshold = web_threshold + weights.file_download;

@@ -1,5 +1,6 @@
 use rand::Rng;
 use shared::{ConnectionType, Message, MessageType, MetricsCollector};
+use socket2::{Domain, Protocol, Socket, Type};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -7,21 +8,99 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
 
+#[derive(Debug, Clone)]
+pub struct TcpServerConfig {
+    pub dual_stack: Option<bool>,
+    pub udp_batch_size: Option<usize>,
+    pub udp_buffer_size: Option<usize>,
+}
+
+impl Default for TcpServerConfig {
+    fn default() -> Self {
+        Self {
+            dual_stack: None,
+            udp_batch_size: None,
+            udp_buffer_size: None,
+        }
+    }
+}
+
 pub struct TcpServer {
     listen_addr: SocketAddr,
     metrics: Arc<MetricsCollector>,
+    config: TcpServerConfig,
 }
 
 impl TcpServer {
     pub fn new(listen_addr: SocketAddr, metrics: Arc<MetricsCollector>) -> Self {
+        Self::new_with_config(listen_addr, metrics, TcpServerConfig::default())
+    }
+
+    pub fn new_with_config(
+        listen_addr: SocketAddr,
+        metrics: Arc<MetricsCollector>,
+        config: TcpServerConfig,
+    ) -> Self {
         Self {
             listen_addr,
             metrics,
+            config,
         }
     }
 
+    fn create_listener(&self) -> anyhow::Result<TcpListener> {
+        let domain = if self.listen_addr.is_ipv6() {
+            Domain::IPV6
+        } else {
+            Domain::IPV4
+        };
+
+        let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
+
+        // Configure dual stack for IPv6
+        if let Some(dual_stack) = self.config.dual_stack {
+            if self.listen_addr.is_ipv6() {
+                socket.set_only_v6(!dual_stack)?;
+            }
+        }
+
+        // Set UDP batch and buffer sizes (global variables from referenced code)
+        if let Some(_udp_batch_size) = self.config.udp_batch_size {
+            // Note: UDP_BATCH_SIZE would be set here if it were a global variable
+            // This is included for compatibility with the referenced code pattern
+        }
+        if let Some(_udp_buffer_size) = self.config.udp_buffer_size {
+            // Note: UDP_BUFFER_SIZE would be set here if it were a global variable
+            // This is included for compatibility with the referenced code pattern
+        }
+
+        // Set TCP_NODELAY
+        socket.set_tcp_nodelay(true)?;
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            // Enable SO_REUSEPORT for better load distribution
+            socket.set_reuse_port(true)?;
+        }
+
+        // Bind to the address
+        socket.bind(&socket2::SockAddr::from(self.listen_addr))?;
+
+        // Listen with higher backlog (i32::MAX instead of default 1024)
+        socket.listen(i32::MAX)?;
+
+        // Set non-blocking mode
+        socket.set_nonblocking(true)?;
+
+        // Convert to tokio TcpListener
+        let std_listener = std::net::TcpListener::from(socket);
+        let tcp_listener = TcpListener::from_std(std_listener)?;
+
+        Ok(tcp_listener)
+    }
+
     pub async fn start(&self) -> anyhow::Result<()> {
-        let listener = TcpListener::bind(self.listen_addr).await?;
+        let listener = self.create_listener()?;
         tracing::info!("TCP server listening on {}", self.listen_addr);
 
         loop {
