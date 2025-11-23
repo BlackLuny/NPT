@@ -141,6 +141,7 @@ impl TcpServer {
                     if session_id.is_none() {
                         session_id = Some(message.session_id);
                     }
+                    tracing::debug!("connection id: {connection_id:?} session id: {session_id:?} received message {}", message.msg_name());
 
                     metrics.record_packet_received(&connection_id);
                     metrics.record_bytes_received(&connection_id, message.payload.len() as u64);
@@ -163,10 +164,14 @@ impl TcpServer {
                             metrics.record_latency(&connection_id, response_time);
 
                             if !should_continue {
+                                let _ = stream.shutdown().await;
+                                drop(stream);
                                 break;
                             }
                         }
                         Err(e) => {
+                            let _ = stream.shutdown().await;
+                            drop(stream);
                             tracing::warn!("Error handling message: {}", e);
                             metrics.record_error(&connection_id);
                             break;
@@ -174,6 +179,8 @@ impl TcpServer {
                     }
                 }
                 Err(e) => {
+                    let _ = stream.shutdown().await;
+                    drop(stream);
                     if e.to_string().to_lowercase().contains("eof") {
                         tracing::debug!("Client disconnected: {}", addr);
                     } else {
@@ -184,7 +191,6 @@ impl TcpServer {
                 }
             }
         }
-
         let connection_duration = connection_start.elapsed();
         tracing::debug!(
             "TCP connection {} closed after {:?}",
@@ -276,11 +282,16 @@ impl TcpServer {
                 Ok(true)
             }
             MessageType::ConnectionClose => {
-                tracing::debug!("Received connection close request");
+                tracing::debug!(
+                    "connection id: {connection_id:?} Received connection close request"
+                );
                 Ok(false)
             }
             _ => {
-                tracing::warn!("Unexpected message type: {:?}", message.message_type);
+                tracing::warn!(
+                    "connection id: {connection_id:?} Unexpected message type: {:?}",
+                    message.message_type
+                );
                 Ok(true)
             }
         }

@@ -41,6 +41,24 @@ impl Message {
         }
     }
 
+    pub fn msg_name(&self) -> &'static str {
+        match self.message_type {
+            MessageType::TlsHandshake => "TLSHandshake",
+            MessageType::HttpRequest => "HttpRequest",
+            MessageType::HttpResponse => "HttpResponse",
+            MessageType::FileDownloadRequest => "FileDownloadRequest",
+            MessageType::FileDownloadChunk => "FileDownloadChunk",
+            MessageType::FileUploadRequest => "FileUploadRequest",
+            MessageType::FileUploadChunk => "FileUploadChunk",
+            MessageType::GamePacket => "GamePacket",
+            MessageType::ConnectionClose => "ConnectionClose",
+            MessageType::HttpGetRequest => "HttpGetRequest",
+            MessageType::HttpGetResponse => "HttpGetResponse",
+            MessageType::ResourceRequest => "ResourceRequest",
+            MessageType::ResourceResponse => "ResourceResponse",
+        }
+    }
+
     pub fn with_sequence(mut self, sequence: u64) -> Self {
         self.sequence = sequence;
         self
