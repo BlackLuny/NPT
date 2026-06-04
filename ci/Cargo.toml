@@ -1,0 +1,21 @@
+[package]
+name = "npt-ci"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "npt-ci"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+bytes = { workspace = true }
+reqwest = { workspace = true }
+toml = { workspace = true }

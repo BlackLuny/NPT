@@ -1,0 +1,38 @@
+# npt-ci — zf-worker forwarding stress/continuity test config.
+# Copy to ci.toml and fill in. CLI flags (--panel-url/--api-key/--ports/...) override these.
+
+# Panel base URL (zf-web). No trailing slash needed.
+panel_url = "https://panel.example.com"
+
+# X-API-Key. Must be an ADMIN-owned key if [archive].collect_logs = true,
+# otherwise a normal-user key is enough (logs just won't be pulled).
+api_key = "REPLACE_ME"
+
+# Port IDs to test. Forwarding for these must already be configured to point at
+# the host running `npt-ci serve` (the echo endpoint / Mode A).
+port_ids = [101, 102]
+
+[test]
+protocol = "tcp"            # "tcp" | "udp" | "both" (udp leg only for ports with enable_udp)
+connections_per_port = 32   # concurrent flows per port
+duration_secs = 120         # how long each port is driven
+payload_bytes = 16384       # per-frame payload size (TCP). NOTE: for UDP keep <=1400 —
+                            # larger datagrams fragment or fail with EMSGSIZE (macOS cap 9216).
+connect_timeout_secs = 10
+ramp_ms = 2000              # spread connection starts to avoid a thundering herd
+send_rate_bps = 0           # 0 = unbounded (socket backpressure governs rate)
+udp_interval_ms = 20        # UDP send cadence per flow
+
+[detect]
+stall_secs = 5                     # no echoed bytes for N s on an active flow => stall (断流)
+fail_on_stall = true
+fail_on_midstream_disconnect = true
+fail_on_no_return = true           # connected but zero bytes echoed back => one-way dead (单通)
+max_connect_fail_ratio = 0.10      # tolerate up to 10% connect failures
+min_throughput_kbps = 0.0          # 0 = disabled
+max_rtt_p95_ms = 0.0               # 0 = disabled
+
+[archive]
+out_dir = "./runs"          # run-<timestamp>/ subdir created per run
+collect_logs = true         # on failure, pull worker debug ZIPs (needs admin api_key)
+debug_collector_ids = []    # empty = all available collectors
